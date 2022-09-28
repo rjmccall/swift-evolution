@@ -17,7 +17,7 @@ A proposal author formally indicates that they would like the Swift project to i
 The purpose of the cursory review is to ensure that the proposal meets the minimum standards to be considered for review:
 - The proposal must be well-developed: the document should clearly explain what it is proposing and make a well-structured argument in favor of that proposal.
 - The proposal must have been "thoroughly pitched": the community must have had an opportunity to provide feedback, and while discussion need not have completely ended, it should have reached some sort of steady state where it seems to largely be treading on familiar ground.
-- The proposal must have an implementation: the basic requirements of the implementation should be known, its consequences (e.g. for source compatibility) should be understood, and people should be able to experiment with using it.
+- The proposal must have an implementation: the basic requirements of the implementation should be known, its consequences (e.g. for source compatibility) should be understood, and people should be able to experiment with using it. See the "Cursory implementation review" section below.
 
 Workgroup members perform cursory review by ensuring that it has an appropriate label.  The following standard labels are available, but workgroup members may use other labels as they see fit:
 
@@ -36,6 +36,38 @@ If a workgroup member feels during cursory review that a proposal should simply 
 Cursory review is meant to be a rapid and lightweight "triage" process which keeps proposal authors up to date about the current status and unmet expectations (if any) of their proposal. Cursory review should happen within two weeks of the proposal first being opened as a non-draft PR. Proposals that are currently being pitched should be re-reviewed at least every two weeks. Proposals that have been marked `Ready` should be assigned a review manager within two weeks; after that point, it becomes the review manager's responsibility to keep the authors aware of the situation (see below). Proposal authors who believe that their proposal has been overlooked, or who believe that it is ready for review despite the comments of cursory reviewers, may reach out to another member of the workgroup.
 
 Proposal PRs are developed using the standard code-review processes of GitHub. Any member of the community may participate in this process. Workgroup members performing cursory review may need to ask other contributors who have worked in the area of the proposal to participate in the review or the pitch. Assigning the proposal PR to a reviewer does not imply anything about whether that reviewer will be the review manager for the proposal; in fact, it may imply that they are an expert in the proposal domain and should specifically *not* serve as the review manager so that they are more free to comment in the review.
+
+### Cursory implementation review
+
+Swift evolution proposals are required to have an implementation before they can be reviewed. This requirement has three purposes.
+
+First, to ensure the proposal is theoretically sound. Some proposals that seem reasonable on the surface have non-obvious theoretical problems that make them difficult or even unsound to implement. For example, a proposal that introduced new `#if` conditions that depended on user-provided declarations would be theoretically challenging because `#if` can change the set of declarations. Implementing a proposal tends to encourage rigorous thinking about its behavior and so can help reveal these problems.
+
+Second, to ensure the proposal is practically feasible. Some proposals that seem reasonable in the abstract run into practical problems that prevent them from being added to the language. For example, they may cause unexpected source compatibility issues, or they may degrade type-checker performance in unacceptable ways. [SE-0220](https://github.com/apple/swift-evolution/blob/main/proposals/0220-count-where.md) is an interesting example: under current type-checking rules, adding a `count(where:)` method to `Sequence` sometimes interferes with accesses to the `count` property on `Collection`s, breaking the compilation of existing programs. Unblocking the addition of SE-0220 to the language requires the type-checking rules to be fixed. Having an implementation allows this sort of thing to be tested, so that the workgroup does not accept a proposal (as the Core Team did with SE-0220) only to find out retroactively that it cannot yet be added to the language. Having an implementation also lets reviewers try the feature out, in case there are usability concerns (such as making it too easy to trigger unsafe behavior) that should be considered in the review.
+
+Finally, to ensure the proposal can be integrated into the language reasonably promptly. Evolution proposals are expected to build on each other. When a proposal has been accepted but is not yet available in the language, it puts related proposals in the awkward position of needing to accommodate a feature that doesn't really exist. The evolution process should not build castles in the sky; there should be a feasible path for delivering every accepted feature within a reasonable period of time, preventing accepted proposals from indefinitely holding up other work.
+
+That said, the provided implementation doesn't need to be ready to commit as soon as the review is complete. It may not even be the implementation that code maintainers will ultimately accept. The initial proposal implementation just needs to be sufficient to satisfy the three goals above. Workgroup members should use the following guidelines when determining whether the implementation is sufficient for the proposal to be reviewed:
+
+- The implementation must fully implement the proposed feature. If part of the feature is proving harder to implement, that may indicate significant theoretical or practical problems; an incomplete implementation should not be ignored as something that can be finished later.
+
+- The implementation must take a sound conceptual approach as judged by code maintainers in the affected areas. It may have significant implementation flaws, such as not fitting into the compiler architecture correctly, but the basic idea of the implementation should not be dodging major theoretical concerns. Cursory reviewers should engage with appropriate code maintainers in order to get their opinion about whether the implementation satisfies this point.
+
+- The implementation needs to work well enough for its consequences to be tested, both by Swift users and by automated systems. All of the required steps here are achievable automatically with the [Swift CI system](https://www.swift.org/continuous-integration/).
+
+  - At a minimum, a PR enabling the feature must pass the full Swift project correctness test suite (i.e. `@swift-ci Please test`) on all core platforms (i.e. those tested by `@swift-ci Please test`).
+
+  - Toolchains with the feature enabled should be made available by the time of review.
+
+  - All proposals that affect type-checking (whether by changing the compiler or by changing libraries) should be tested for source compatibility regressions in code not using the proposed feature. Regressions should at least be understood before the review begins, and the workgroup may decide that they must be resolved first.
+
+  - Proposals should be tested for their build performance impact if the workgroup deems it necessary. (Note that the evolution concern here is about *user* build performance, not the build performance of Swift project maintainers.)
+
+  - Proposals should be tested for their runtime performance impact if the workgroup deems it necessary.
+
+  Build and runtime performance testing should consider the impact on both adopting and non-adopting code. Features that impose substantial build or runtime performance costs on unrelated code should be strongly discouraged. Features that cannot be adopted without suffering major build or runtime performance regressions may hinder their own adoption. Both are highly relevant to evolution review.
+
+  Workgroups should exercise prudence when requesting performance testing on proposal implementations. Meaningful performance testing often requires ad hoc test development in order to properly reveal the impact of the proposal; simply running the existing build or runtime benchmarks may not be sufficient. If code maintainers believe that the proposed implementation is specifically prone to performance risks, then this testing should be done; but to avoid mounting burdens on the proposal authors, it should not be requested simply as a matter of course.
 
 ### Rejecting a proposal without a review
 
