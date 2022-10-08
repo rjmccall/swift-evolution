@@ -140,13 +140,44 @@ When talking to the proposal authors, you should be clear about the role you’r
 
 If your relationship to the proposal authors seems to be deteriorating, ask the workgroup for guidance. It may be better for someone else to take over as review manager. Alternatively, it may be necessary for the workgroup to take corrective action with the authors, such as reminding them of their responsibilities to engage with feedback as proposal authors and/or to follow the Code of Conduct as community members.
 
-### Future Directions and Roadmaps
+### Future Directions, Visions, and Roadmaps
 
-Most proposals should have at least some content in the Future Directions section. However, if the Future Directions section appears to be getting very large, or if the pitch thread is full of requests for greater scope in the proposal, or if the proposal feels like an early step towards something much larger, it may be appropriate to develop a roadmap for the larger feature area before proceeding with the review. The proposal can then clearly situate itself within that roadmap.
+Most proposals should have at least some content in the Future Directions section. However, if the Future Directions section appears to be getting very large, or if the pitch thread is full of requests for greater scope in the proposal, or if the proposal feels like an early step towards something much larger, it may be appropriate to develop a vision for the larger feature area before proceeding with the review. The proposal can then clearly situate itself within that vision.
 
-Generally, feature roadmap documents are solicited and approved by the workgroup outside of the evolution review process. This approval is not an endorsement of everything in the document, and it doesn’t set anything in stone, but it does signal general acceptance of the basic approach laid out by the roadmap.
+If you believe that a vision may be appropriate as you help prepare a proposal for review, you should raise that with the workgroup. If the workgroup does decide to solicit a vision, the proposal review will need to be delayed until the vision has been written and approved.
 
-If you believe that a feature roadmap may be appropriate as you help prepare a proposal for review, you should raise that with the workgroup. If the workgroup does decide to solicit a roadmap, the proposal review will need to be delayed until the roadmap is available.
+Separately, some proposals are intricately inter-related with each other.  This can happen when a proposal is one part of a larger vision, but it can also happen when a single proposal needs to be split up in order to receive effective detailed review.  It may be useful in such cases to also prepare a roadmap which lays out the specific schedule of proposals being considered and how they relate to each other.  A roadmap is a separate document from the vision document and serves a different purpose.
+
+#### Visions
+
+A vision document is a design document that lays out a long-term vision for how one specific area of the project should evolve.  (Visions were previously called "manifestos".)
+
+Defining a vision serves two purposes.  First, it creates common ground that will make future evolution discussions more productive by establishing standard terminology for those discussions, communicating the key problems faced in this area, and setting the goals that any solution should live up to.  Second, it lays out a relatively comprehensive and holistic picture of all the changes that the authors feel ought to be made, allowing the evolution review process to proceed through each of those changes individually while still understanding their place in the larger picture and how they interact with other changes.  In both cases, the goal is that a member of the community should be able to read the vision and come away ready to engage productively with evolution discussion, even if they don't necessarily agree perfectly with the vision.
+
+A vision document consists primarily of three sections: an analysis of the current state of the area, a definition of the goals that evolution in this area should strive to satisfy, and a description of the general approach that should be taken by evolution.
+
+The analysis section should endeavor to present an objective and accurate view of the current state of affairs.  How do users get work done in this area?  What problems do they encounter?  Can these problems be solved within the Swift project, or are users forced to turn outside of it?  Are there systemic problems, and are they exacerbated by the solutions users are forced to use?
+
+The goals section should define and analyze the goals that any evolution in this area must satisfy.  These should not be reduced to simple aspirational statements.  How do the specific problems faced in this area relate to the overall goals of the Swift project?  What are the most important problems to solve?  Different goals (such as safety and performance) can often be in conflict with each other; how should these trade-offs be resolved?
+
+The approach section should lay out a high-level plan for the work that should be done.  It should start by laying out the basic principles of the approach, then describe how those principles can be concretely applied to specific problems in the area.  Often this will take the form of brief descriptions of a number of different proposed features.  These proposal descriptions do not need to be intensely detailed and may leave major questions open for future discussion; of all the sections, it's most okay for this section to sometimes be vague or incomplete, because all of the content will be separately reviewed.  That said, the basic principles of the approach should be clearly laid out and convincingly argued for.
+
+Vision documents must be approved by the appropriate evolution workgroup(s).  (There was no expectation of this for the old "manifestos", although many were written by Core Team members and so were understood to carry a certain weight.)  Approving a vision signals strong agreement with the analysis and goals sections, as well as the basic principles of the approach.  It does not endorse any of the details of the proposals, and the workgroup should not feel bound in any decision by having previously accepted a vision document.  The evolution community should treat the approval of a vision as a broad statement about how the workgroup thinks about the subject area, not as a prejudgment on any related proposal that arises in the future.
+
+A vision document that has not yet been approved is called *prospective*.  Prospective vision documents are usually solicited specifically by a workgroup, but they may be written by anyone.  Any document that looks like a vision document but hasn't yet been approved by a workgroup should clearly identify itself as provisional near its beginning.  The process of soliciting, writing, and approving a vision document is outside of the standard evolution review process, and the workgroup may use whatever system they feel is appropriate.  The approval of a vision document should be announced clearly to the community by posting in the Evolution Announcements category.
+
+#### Roadmaps
+
+A roadmap document is a project-management document that describes the organization of some related work.
+
+The goals of writing and maintaining a roadmap are:
+- to make it easier to follow the progress of the larger work,
+- to make it easier to understand how the currently-active work fits into the larger work, and
+- taking advantage of the above, to enable large works to be more readily divided and considered in parts.
+
+For example, suppose that implementing a particular vision requires the addition of a complex central feature and several secondary features that build on it.  Several aspects of the central feature are known to be controversial, and putting the whole thing through review at once will likely lead to relatively poor feedback on other aspects.  Writing a roadmap for how all these proposals will be reviewed makes it easier to break the review of the central feature into multiple reviews, as well as to keep reviewers focused on the immediate subject under review.
+
+Roadmaps are not governed by the evolution process and should be used however workgroups feel would be helpful.
 
 ### Bureaucratic details of managing the pre-review
 
