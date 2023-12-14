@@ -8,34 +8,78 @@ Evolution reviews are associated with a particular workgroup that is responsible
 
 When a workgroup decides to consider a proposal for evolution review, it appoints a *review manager* to be its representative for that review. The review manager is typically a member of the workgroup. The review manager ensures the proposal meets the standards for review, handles review scheduling, writes public announcements about the review, oversees review discussion, compiles and summarizes review feedback for the workgroup’s deliberations, and conveys feedback from the workgroup to the authors. The rest of this document will describe all of these roles, as well as the process of selecting the review manager, in more detail.
 
-## Initiating a review
+## Summary of the review process
 
-A proposal author formally indicates that they would like the Swift project to initiate a review of their proposal by opening a (non-draft) pull request against the [swift-evolution repository](https://github.com/apple/swift-evolution/). Members of the associated workgroup will see the proposal and perform a *cursory review*. Since most proposals are associated with the Language Workgroup, the Language Workgroup is primarily responsible for monitoring this repository and informing other workgroups that there is a proposal for them to perform a cursory review of.
+Every proposal goes through several stages of review:
 
-### Cursory review
+- A member of the workgroup performs *cursory review* on the open evolution PRs.
+- The cursory reviewer brings proposals to the workgroup for *full cursory review*.
+- The workgroup assigns a review manager who performs *preliminary review*.
+- The review manager presents the proposal to the workgroup for *preflight review*.
+- The review manager presents the proposal to the community for *open review*.
+- The review manager presents the proposal to the workgroup for final review*.
 
-The purpose of the cursory review is to ensure that the proposal meets the minimum standards to be considered for review:
+## Criteria for open review
+
+In order to advance to open review, a proposal must meet four criteria:
+
 - The proposal must be well-developed: the document should clearly explain what it is proposing and make a well-structured argument in favor of that proposal.
+
 - The proposal must have been "thoroughly pitched": the community must have had an opportunity to provide feedback, and while discussion need not have completely ended, it should have reached some sort of steady state where it seems to largely be treading on familiar ground.
+
 - The proposal must have an implementation: the basic requirements of the implementation should be known, its consequences (e.g. for source compatibility) should be understood, and people should be able to experiment with using it. See the "Cursory implementation review" section below.
 
-Workgroup members perform cursory review by ensuring that it has an appropriate label.  The following standard labels are available, but workgroup members may use other labels as they see fit:
+- The proposal must have a fair shot of eventually being accepted: the workgroup should not already be opposed to the substance of the proposal. See the "Rejecting a proposal without a review" section below.
 
-- `Workgroup: Needs Development` means that the proposal document requires significant further development, either in its substance or in its presentation of the proposal. This label should be accompanied by detailed review comments (not necessarily from the workgroup member). Issues about the substance of the proposal should be raised in the pitch thread if they haven't yet been discussed there, and the PR review may simply refer to those posts.
+The primary purpose of each of the review stages prior to open review is to verify, with increasing confidence, that the proposal meets these four criteria.
 
-- `Workgroup: Needs Pitch` means either that the proposal has not yet been pitched or that the pitch hasn't yet reached a steady state. If the proposal hasn't been pitched yet, the reviewer should call that out in a comment.
+## Cursory review
 
-  This label should be periodically reconsidered while the proposal remains in pitch. If the reviewer decides that the pitch still hasn't reached a steady state, they should briefly describe the remaining controversy in a comment on the PR. For example: "Looks like there's still good discussion in the pitch about whether this feature should be able to throw an error."
+### Triggering cursory review
 
-- `Workgroup: Needs Implementation` means the proposal lacks an implementation or the implementation is lacking. This generally requires a comment explaining the problem.
+A proposal author formally indicates that they would like the Swift project to initiate a review of their proposal by opening a non-draft pull request against the [swift-evolution repository](https://github.com/apple/swift-evolution/). Members of the associated workgroup will see the PR and conduct the *cursory review* as discussed in this section.
 
-- `Workgroup: Ready` means that the proposal is ready to be considered for review. If the workgroup agrees, it will be assigned a review manager, who will perform the *preliminary review*. See the "Assigning a review manager" section below.
+Since most evolution proposals are associated with the Language Steering Group, the LSG is primarily responsible for monitoring this repository and informing other workgroups that there is a proposal for them to perform a cursory review of.
 
-If a workgroup member feels during cursory review that a proposal should simply be rejected without further review, they should bring that up with the full workgroup without assigning a label. See the "Rejecting a proposal without a review" section below.
+Cursory review is meant to be a lightweight and informal process. Often different people will do different parts of the review, or it may be done collectively by the workgroup. As long as the goals are met and proposals are getting regular attention, the cursory review process is working.
 
-Cursory review is meant to be a rapid and lightweight "triage" process which keeps proposal authors up to date about the current status and unmet expectations (if any) of their proposal. Cursory review should happen within two weeks of the proposal first being opened as a non-draft PR. Proposals that are currently being pitched should be re-reviewed at least every two weeks. Proposals that have been marked `Ready` should be assigned a review manager within two weeks; after that point, it becomes the review manager's responsibility to keep the authors aware of the situation (see below). Proposal authors who believe that their proposal has been overlooked, or who believe that it is ready for review despite the comments of cursory reviewers, may reach out to another member of the workgroup.
+This section will address the reader ("you") as if you were performing a cursory review by yourself.
 
-Proposal PRs are developed using the standard code-review processes of GitHub. Any member of the community may participate in this process. Workgroup members performing cursory review may need to ask other contributors who have worked in the area of the proposal to participate in the review or the pitch. Assigning the proposal PR to a reviewer does not imply anything about whether that reviewer will be the review manager for the proposal; in fact, it may imply that they are an expert in the proposal domain and should specifically *not* serve as the review manager so that they are more free to comment in the review.
+### Cursory review process
+
+You perform cursory review by briefly looking at the proposal's pitch, proposal document, and implementation, and evaluating them for the four criteria for open review. You then add the appropriate label on the proposal PR. When the proposal is ready, you bring it up with the full workgroup for the full cursory review.
+
+The following PR labels are available, but you may use other labels as needed:
+
+- `workgroup: needs development` means that the proposal document requires significant further development, either in its substance or in its presentation of the proposal.
+
+  This label should be accompanied by detailed review comments. If someone else has raised those comments, you don't have to pile on as long as you think the proposal author understands that changes are required. Editorial comments should just be made in the PR. Substantive comments should be made primarily in the pitch thread, and the PR review should just link to them (if that's even necessary). Try not to have the same conversation in two places.
+
+  The proposal author is responsible for making changes to the proposal document that will allow it to be moved out of this state.
+
+- `workgroup: needs pitch` means either that the proposal has not yet been pitched or that the pitch hasn't yet reached a steady state.
+
+  If the proposal hasn't been pitched yet, the reviewer should call that out in a comment. The proposal author is responsible for creating the pitch thread.
+
+  Proposals should be in pitch for at least a few weeks before they're reviewed. Once a proposal is in pitch, this label should be periodically reconsidered. If you think the pitch hasn't yet reached a steady state, and it's been a while since the proposal got an update (or the proposal author is asking you about it), you should leave a PR comment briefly describing the remaining controversy as you see it. For example: "Looks like there's still good discussion in the pitch about whether this feature should be able to throw an error."
+
+- `workgroup: needs implementation` means the proposal lacks an implementation or the implementation is lacking.
+
+  This label generally requires a comment explaining the problem, either in the proposal PR or the implementation PR. The proposal author is responsible for advancing the implementation to a point where it satisifes the cursory implementation review.
+
+- `workgroup: needs implementation review` means the proposal has an apparent implementation, but it needs to undergo cursory implementation review. See the "Cursory implementation review" section below.
+
+  It's the workgroup's responsibility to make sure the implementation review is performed and then relabel the proposal PR. If you put this label on a proposal, you should find someone to make sure the review is actually happening and periodically follow up with them.
+
+- `workgroup: ready` means that the proposal is ready to be considered by the rest of the workgroup as the full cursory review. See the "Full cursory review" section below.
+
+If you feel that a proposal should simply be rejected without further review, you should bring it up to the workgroup immediately for full cursory review. You don't need to assign it a label.
+
+During cursory review, the standard for the four criteria for open review is relatively low. This is because the review manager will be doing a more thorough evaluation if the proposal advances. For example, if you've been reading the pitch thread and feel that there's a major concern that hasn't yet been addressed in the proposal, that's a good reason to not advance it yet; but there's no need to read over the whole pitch thread looking for unaddressed items, because the review manager will be doing that. Similarly, the review manager can work with the proposal author to improve the argumentation in the proposal document, and cursory review should be focused on whether the document is close enough for that engagement to be a good use of time.
+
+Cursory review is meant to be a rapid and lightweight "triage" process which keeps proposal authors up to date about the current status and unmet expectations (if any) of their proposal. Cursory review should happen within two weeks of the proposal first being opened as a non-draft PR. Proposals that are currently being pitched should be re-reviewed at least every two weeks. Proposals that have been marked `workgroup: ready` should be assigned a review manager within two weeks; after that point, it becomes the review manager's responsibility to keep the authors aware of the situation (see below). Proposal authors who believe that their proposal has been overlooked, or who believe that it is ready for review despite the comments of cursory reviewers, may reach out to another member of the workgroup.
+
+Proposal PRs are developed using GitHub's standard code-review processes. Any member of the community may participate in this process. You may need to ask other contributors who have worked in the area of the proposal to participate in the review or the pitch. You may also find assigning the proposal PR to someone to be helpful. Assigning a proposal PR doesn't mean that the assignee will be the review manager for the proposal; in fact, it may imply that they are an expert in the proposal domain and should specifically *not* serve as the review manager so that they are more free to comment in the review.
 
 ### Cursory implementation review
 
@@ -47,7 +91,7 @@ Second, to ensure the proposal is practically feasible. Some proposals that seem
 
 Finally, to ensure the proposal can be integrated into the language reasonably promptly. Evolution proposals are expected to build on each other. When a proposal has been accepted but is not yet available in the language, it puts related proposals in the awkward position of needing to accommodate a feature that doesn't really exist. The evolution process should not build castles in the sky; there should be a feasible path for delivering every accepted feature within a reasonable period of time, preventing accepted proposals from indefinitely holding up other work.
 
-That said, the provided implementation doesn't need to be ready to commit as soon as the review is complete. It may not even be the implementation that code maintainers will ultimately accept. The initial proposal implementation just needs to be sufficient to satisfy the three goals above. Workgroup members should use the following guidelines when determining whether the implementation is sufficient for the proposal to be reviewed:
+That said, the provided implementation doesn't need to be ready to commit as soon as the review is complete. It may not even be the implementation that code maintainers will ultimately accept. The initial proposal implementation just needs to be sufficient to satisfy the three goals above. You should use the following guidelines when determining whether the implementation is sufficient for the proposal to be reviewed:
 
 - The implementation must fully implement the proposed feature. If part of the feature is proving harder to implement, that may indicate significant theoretical or practical problems; an incomplete implementation should not be ignored as something that can be finished later.
 
@@ -69,6 +113,32 @@ That said, the provided implementation doesn't need to be ready to commit as soo
 
   Workgroups should exercise prudence when requesting performance testing on proposal implementations. Meaningful performance testing often requires ad hoc test development in order to properly reveal the impact of the proposal; simply running the existing build or runtime benchmarks may not be sufficient. If code maintainers believe that the proposed implementation is specifically prone to performance risks, then this testing should be done; but to avoid mounting burdens on the proposal authors, it should not be requested simply as a matter of course.
 
+## Full cursory review
+
+When a workgroup talks about a proposal that doesn't have a review manager yet, that is a *full cursory review*. Essentially, the workgroup performs a cursory review using their collective experience with the proposal.
+
+If a member of the workgroup has performed an individual cursory review and thinks that the workgroup should made a final decision on the proposal (i.e. that it is either ready for review or should be rejected), they should ensure it is promptly brought up for full cursory review.
+
+There are three primary outcomes of a full cursory review:
+
+- There is substantial agreement in the workgroup that the proposal can be rejected without further review. The workgroup should pick someone to make an official statement explaining why; typically, this statement will be made in the pitch thread. The proposal PR can then be closed with a reference to the statement. See the "Rejecting a proposal without a review" section below.
+
+- There is substantial agreement in the workgroup that the proposal meets the four criteria for advancing from cursory review. The proposal PR should be labeled with `workgroup: ready` if it hasn't already been, and the workgroup should pick someone to act as the review manager. See the "Assigning a review manager" section below.
+
+- The proposal does not yet meet the criteria for advancing from cursory review, or at least there isn't substantial agreement to do anything else. The proposal PR should be relabeled appropriately, and the workgroup should ensure that someone will talk to the author or engage in the pitch thread as befits the decision; see the "Cursory review process" section above.
+
+  When workgroup members engage with the pitch thread, e.g. to convey concerns about the current proposal, they should usually *not* present it as an official statement from the workgroup, even if there is substantial agreement in the workgroup about those concerns. Instead, they should prefer to participate in the pitch as ordinary members of the community who happen to have those concerns. Workgroup members should feel free to disagree with each other in the pitch. An official statement should be made only if there is substantial agreement in the workgroup that it is necessary in order to make progress on the proposal.
+
+### Assigning a review manager
+
+When the workgroup decides that a proposal satisfies the four criteria for advancing from cursory review, it assigns the proposal a review manager.
+
+Ideally, the review manager should be someone who hasn’t been been extensively engaged in the development of the proposal and is willing to remain neutral during the review. The review manager must be able to carry out their duties in a way that all sides will perceive as fair. If the review manager has expressed strong feelings about the proposal, community members may react badly to moderation decisions that seem to favor the review manager's side, or they may worry that the review manager will not fairly represent the views of opposing sides during workgroup deliberations. This can very quickly make the review a toxic environment.
+
+That is not to say that the review manager may not have an opinion on the proposal's merits. Review managers are members of the workgroup and therefore likely to have opinions on most things of importance to the project, and reviews are certainly important to the project. But a review manager must be willing to treat all perspectives with an even hand during the review. Even if they disagree with a position, they must encourage that position's proponents to develop and present their arguments in the best way possible and then accurately summarize those arguments for the Language Workgroup. If a review manager decides at any point that they cannot continue to effectively serve, they should work with the rest of the workgroup to find a replacement.
+
+Assigning a review manager does not commit the workgroup to actually running a review for the proposal. One of the review manager’s first responsibilities is to conduct the preliminary review and advise the workgroup if the proposal is ready to review.
+
 ### Rejecting a proposal without a review
 
 Initiating a review is not an endorsement of the proposal by the workgroup. However, it is an endorsement of the idea that the proposal is at least worth the community’s time to consider. The workgroup does not have a responsibility to run every proposal for which a PR is opened, or even every proposal that meets the minimum standards.
@@ -77,33 +147,31 @@ Initiating a review is not an endorsement of the proposal by the workgroup. Howe
 
 * Otherwise, if there is substantial agreement among workgroup members (not necessarily consensus, but enough to block acceptance) that they would not accept the proposal in its current form, a review should not be run. The members opposed to the proposal should engage with the pitch thread to explain their objections. This is considered to be part of the pitch phase, not a conclusive end to the proposal. The proposal PR should generally be labeled `Workgroup: Needs Development` rather than being immediately closed. If the authors respond in a way which satisfies the objections of the workgroup (either by modifying the proposal or convincing the workgroup members they are mistaken), then the proposal may be reviewed. If not, the proposal simply continues in the pitch phase, which is not limited in time. However, the workgroup may elect to close proposal PRs which appear to no longer be making progress towards review.
 
-### Assigning a review manager
+## Preliminary review
 
-When a proposal reaches the `Workgroup: Ready` state, the workgroup performs a collective cursory review to decide whether it is ready to be considered for review. This may result in the proposal being returned for more development or being rejected without a review. If the workgroup decides that a proposal is indeed ready to be considered for review, it assigns the proposal a review manager.
+After the workgroup decides that a proposal appears to satisfy the criteria for advancing past cursory review, a review manager is selected to guide the proposal through the rest of the review process.
 
-Ideally, the review manager should be someone who hasn’t been been extensively engaged in the development of the proposal and is willing to remain neutral during the review. The review manager must be able to carry out their duties in a way that all sides will perceive as fair. If the review manager has expressed strong feelings about the proposal, community members may react badly to moderation decisions that seem to favor the review manager's side, or they may worry that the review manager will not fairly represent the views of opposing sides during workgroup deliberations. This can very quickly make the review a toxic environment.
+The remainder of this document will address the reader (“you”) as if you were the review manager for a proposal.
 
-That is not to say that the review manager may not have an opinion on the proposal's merits. Review managers are members of the workgroup and therefore likely to have opinions on most things of importance to the project, and reviews are certainly important to the project. But a review manager must be willing to treat all perspectives with an even hand during the review. Even if they disagree with a position, they must encourage that position's proponents to develop and present their arguments in the best way possible and then accurately summarize those arguments for the Language Workgroup. If a review manager decides at any point that they cannot continue to effectively serve, they should work with the rest of the workgroup to find a replacement.
+Your first responsibility as a review manager is to conduct the *preliminary review*. This phase of the review has two purposes. The first is to ensure that the proposal does in fact meet the criteria for open review. The second is to set up a productive open review that delivers a strong signal to the workgroup about what to do with the proposal.
 
-Assigning a review manager does not commit the workgroup to actually running a review for the proposal. One of the review manager’s first responsibilities is to conduct the preliminary review advise the workgroup if the proposal is ready to review; see below.
+### Overview of the preliminary review
 
-The remainder of this document will address the reader (“you”) as if you were a review manager for a proposal.
-
-### Pre-review procedure
-
-After being appointed as a review manager, you should take the following the steps:
+After being appointed as a review manager, you will be taking the following steps to conduct the preliminary review:
 
 * Review the proposal document to ensure it meets project standards and will be productively reviewable by the community.
+
 * Review the pitch thread(s) for the proposal to ensure that any major ideas brought up there are addressed by the proposal document.
+
 * Work with the proposal authors to make any changes necessary in response to your reviews of the proposal and pitch, as well as to incorporate any early feedback received from the rest of the workgroup.
-* Verify that there is an implementation of the proposal.
-* Ensure that that the header fields of the proposal are correct in the pull request.
-* Work with the workgroup and the proposal authors to schedule the review. The most important thing is that both you and the authors will be continually available during the review period, without more than a day's absence.
-* When the review is about to begin, assign the proposal document an SE-NNNN number, update the pull request appropriately (see below), and then merge it into the Evolution repository.
 
-### Preliminary review
+* Verify that there is an implementation of the proposal that satisfies the requirements for review.
 
-Your goal in this preliminary stage is to set up a productive review that will deliver strong signal to the workgroup about how to proceed. You do this in three primary ways:
+* Present the proposal to the workgroup for the pre-flight review.
+
+### Preliminary review process
+
+As stated above, one of your main goals in the preliminary review is to set up a productive review that will deliver strong signal to the workgroup about how to proceed. You do this in three primary ways:
 
 * Improve the substantive proposal.
 * Improve the argumentation in the proposal document.
@@ -139,6 +207,25 @@ Once you feel you understand the proposal, it may also be useful to brief the wo
 When talking to the proposal authors, you should be clear about the role you’re currently playing. Normally, when you are passing on the results of your review, you are merely making suggestions, asking for clarifications, and so on, as an ordinary member of the community. In principle, any member of the community could do the same review you have done and make the same comments; you simply have a responsibility to have done it. At the end of the day, the proposal belongs to the proposal authors, at least until it’s accepted. You have the authority as review manager to edit the header of the proposal and to make minor editorial changes to the body, but major edits or substantive changes to the document should be made by the proposal authors, and if they’re unwilling to make those changes, they don’t have to. If you feel that the proposal shouldn’t be reviewed until certain changes are made, or if you feel that the proposal authors are unlikely to engage productively during a review, you can argue that to the full workgroup. If the workgroup agrees that the proposal cannot currently be run, then you should communicate that decision back to the authors officially on behalf of the workgroup, and the authors can decide how they wish to proceed.
 
 If your relationship to the proposal authors seems to be deteriorating, ask the workgroup for guidance. It may be better for someone else to take over as review manager. Alternatively, it may be necessary for the workgroup to take corrective action with the authors, such as reminding them of their responsibilities to engage with feedback as proposal authors and/or to follow the Code of Conduct as community members.
+
+### Proposal document structure
+
+During the preliminary review, you should make sure that the proposal document has all of the right headers and sections. Check the document against the latest template. Proposal authors sometimes clone much earlier proposal documents instead of starting from the template. The template has the authoritative guidance on all this.
+
+As a member of the workgroup, you should be able to add commits directly to the proposal PR, and that is generally what you will do.
+
+The filename of the proposal document should be `XXXX-text.md`, where the text is the current title of the proposal. Sometimes the proposal title changes from the first draft, and it's fine to update the filename during this phase. However, once the proposal has been assigned an SE number and merged into the swift-evolution repository, the filename should not be changed, even if the proposal is retitled.
+
+Make sure these headers are set right for now:
+
+* The `Proposal` field should contain a self-link to the current version of the proposal document using SE-NNNN as the link text.
+* The `Authors` field should have the right pluralization and should link to each of the authors (their GitHub account, if they don’t have other preferences). The authors are responsible for deciding who counts as an author. However, you should not be listed as an author, even if you contributed extensive editorial help.
+* The `Review Manager` field should link to you (generally, your GitHub account).
+* The `Status` field should be `Awaiting Review` until the review begins.
+* The `Vision` field should link to the vision docoument that this proposal is part of, if one exists; see below.
+* The `Roadmap` field should link to the discussion thread for the feature roadmap that this proposal is part of, if one exists; see below.
+* The `Implementation` field should link to the most important implementation PRs. It does not need to be comprehensive.
+* The `Review` field should link to the pitch, like so: (pitch ([https://forums.swift.org/ ](https://forums.swift.org/))). Link all of the pitches if there have been more than one. Later links will be added the same way, separated by spaces, with concise but unambiguous link text. The template has more information about this.
 
 ### Future Directions, Visions, and Roadmaps
 
@@ -179,19 +266,37 @@ For example, suppose that implementing a particular vision requires the addition
 
 Roadmaps are not governed by the evolution process and should be used however workgroups feel would be helpful.
 
-### Bureaucratic details of managing the pre-review
+## Pre-flight review
 
-* As a member of the workgroup, you should be able to add commits directly to the proposal PR, and that is generally what you will do.
-* The filename of the proposal document should be `XXXX-text.md`, where the text is the current title of the proposal. Sometimes the proposal title changes from the first draft, and it's fine to update the filename during this phase. However, once the proposal has been assigned an SE number and merged into the swift-evolution repository, the filename should not be changed, even if the proposal is retitled.
-* The `Proposal` field should contain a self-link to the current version of the proposal document using SE-NNNN as the link text.
-* The `Authors` field should have the right pluralization and should link to each of the authors (their GitHub account, if they don’t have other preferences). The authors are responsible for deciding who counts as an author. However, you should not be listed as an author, even if you contributed extensive editorial help.
-* The `Review Manager` field should link to you (generally, your GitHub account).
-* The `Status` field should be `Awaiting Review` until the review begins.
-* The `Roadmap` field should link to the discussion thread for the feature roadmap that this proposal is part of, if one exists.
-* The `Implementation` field should link to the most important implementation PRs. It does not need to be comprehensive.
-* The `Review` field should link to the pitch, like so: (pitch ([https://forums.swift.org/ ](https://forums.swift.org/))). Later links will be added the same way, separated by spaces, with concise but unambiguous link text.
+When you as review manager feel that the time is right, you should present the proposal to the rest of the workgroup. This is the *pre-flight review*, and it is the last step before open review. The purpose of the pre-flight review is to make a second, well-informed decision about whether the proposal meets the four criteria for open review and, if not, what to do about it.
 
-## The review
+The presentation during the pre-flight review should focus on the major questions that have been brought up and/or remain open about the proposal. Here are some suggestions about what to talk about:
+
+- What's actually in the proposal? Give a capsule summary of the proposal's argument and then run through all the substantive changes. This is particularly important if the proposal changed significantly during the pitch, as many do.
+
+- The pitch should have settled down somewhat, at least to a steady state. What are the major things people talked about? Are there factions that don't like some ideas in it? What are the alternatives being proposed?
+
+- The argumentation in the proposal should be about as solid as it can be. Is there something that seems to confuse people in the pitch thread? Can that confusion be reasonably explained, or is it masking something deeper?
+
+- The general expectation is that the implementation will be complete by the time of the open review. If there's substantial work remaining, talk about what's missing. Do you think reviewers be able to actually try out the proposal with what's there?
+
+- Do you personally think this proposal is a good idea?
+
+The standard for evaluating the four criteria for open review should be relatively high during the pre-flight review; after all, it's the last time they'll be applied. Evaluation should be focused on whether the review will be productive and whether the workgroup is at least tentatively in favor of the proposal.
+
+The pre-flight review will often be a short conversation, but it's both understandable and acceptable if it goes quite long. The workgroup doesn't need to make any final decisions prior to open review, but if there are substantial disagreements within the workgroup about major aspects of a proposal, open review probably isn't going to resolve them. Going through weeks of open review and then realizing afterwards that half the workgroup was never actually in favor of the proposal as written is a huge waste of time. (The same is true at earlier stages, if that's when the workgroup realizes it has a difference of opinion.) The workgroup should generally go into reviews with at least tentative agreement about the major points of the design.
+
+There are three primary outcomes of pre-flight review:
+
+- The proposal can be rejected without further review. This follows the same process as during cursory review. As review manager, you do not have to be the one to deliver the opinion of the workgroup if you don't want to.
+
+- The proposal can stay in preliminary review. As with cursory review, the workgroup should make sure that someone engages with the author or in the pitch thread to help the proposal make progress. You will continue to be the review manager for the proposal.
+
+- The proposal can advance to open review. See the "Open review" setion below.
+
+## Open review
+
+As review manager, it is your responsibility to work with the workgroup and the proposal authors to schedule the review. The most important thing is that both you and the authors will be continually available during the review period, without more than a day's absence.
 
 The first round of review should generally last at least 10 days, including two full weekends. Reviews for larger proposals should be longer. Later rounds may have shorter review periods if the workgroup has greatly narrowed the scope of review.
 
@@ -199,8 +304,10 @@ You kick off the review by creating a review thread. Your post should follow the
 
 ### Bureaucratic details of initiating the review
 
-* Proposal document (round 1):
-  * Make sure that pre-review details are right (above).
+The process described here needs at least one extra PRs but avoids creating the review thread with an initially dead link. You can do the first set of changes either by adding commits to the proposal PR or by first merging the proposal PR and then making a separate PR on top of it.
+
+* Proposal document (first PR):
+  * Make sure that all the existing document structure details are right. See the "Proposal document structure" section above.
   * Figure out the next SE number. Remember to talk to your colleagues if more than one review is about to begin.
   * Edit the SE number into the filename of the document.
   * Edit the link target of the Proposal field to use the right SE number.
@@ -209,17 +316,17 @@ You kick off the review by creating a review thread. Your post should follow the
   * You will not be able to link to the review thread yet.
   * Preview the proposal document with all these changes.
   * If everything looks good, merge the PR.
-* Create your review thread:
-  * The thread title should be `SE-NNNN: Title of Proposal`. In later rounds of review, add `(Second Review)` (or whatever) immediately before the colon.
+* Create the review thread:
+  * The thread title should be `SE-NNNN: Title of Proposal`. In later rounds of review, add `(second review)` (or whichever review it is) immediately before the colon.
   * The category should be [Evolution > Proposal Reviews](https://forums.swift.org/c/evolution/proposal-reviews/21). You should have permission to create threads here. Do not create threads here for any other purpose.
   * Add any tags to the review that are meaningful.
   * Post content should generally follow the [review announcement template](https://github.com/apple/swift-evolution/blob/main/process.md#review-announcement) except as described below.
-  * Feel free to tailor the salutation and closing as you see fit. Make sure it’s your name at the bottom.
+  * Feel free to tailor the salutation and closing as you like. Make sure it’s your name at the bottom.
   * Edit the proposal link to be correct. Just link to the main version of the proposal; don’t try to permalink the current revision, it’s more important that people browsing the forums for proposal information don’t accidentally read old revisions than that design historians see a consistent view of the proposal as it originally was at the start of the review.
   * Edit the dates of the proposal.
   * Edit the link to you (if applicable) in the part about contacting you directly, and make sure it reflects how you’d like people to contact you.
   * If there’s something special that the community needs to know procedurally about the review, add it in or after the first paragraph. In subsequent reviews, this will include summarizing the previous history of the proposal (including links to the previous reviews) and explaining how the proposal has been modified (if applicable) and what conclusions the workgroup has already reached (if applicable). If there is a limitation to the scope of the review — like if the workgroup has accepted certain parts, or if the review is just about a specific topic — be explicit about that. You can be honest about failures in the process, but you should discourage discussion of that in the review thread; you might need to make sure there’s somewhere else for that to go.
-* Proposal document (round 2):
+* Proposal document (second PR):
   * Edit the Review field to add a link to the review: ([review](https://forums.swift.org/)).
   * You’ll need to create a new PR to commit this.
   * Be sure to preview the document before you merge.
