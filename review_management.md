@@ -402,7 +402,10 @@ If the decision-making process is dragging out, remember to keep the proposal au
 * When extending the review of a proposal:
   * Make a post in the review thread discussing the workgroup’s conclusions, summarizing any changes, and describing any new limitations on the review.
   * Update the proposal document:
-    * Change the status to `Active review` with the correct dates.
+    * Change the status to `Active review` with the correct dates:
+      * If the review falls within a single month, the status should look like this: `Active review (November 1st...15th, 2023)`
+      * If the review spans a month boundary, the status should look like this: `Active review (November 20th...December 1st, 2023)`
+      * If the review spans a year boundary, the status should look like this: `Active review (December 21st, 2023...January 2nd, 2024)`
 * For any other change:
   * Start a new announcement thread (in Evolution > Announcements):
     * The title should be `[New Status] SE-NNNN: Title of Proposal`
