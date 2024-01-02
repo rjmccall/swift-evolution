@@ -1,23 +1,25 @@
 # Guidelines for Evolution Workgroups and Review Managers
 
-This document lays out the detailed process used by Swift evolution workgroups (such as the [Language Workgroup](https://www.swift.org/community/#language-workgroup)) to take proposals through the [process of evolution review](https://github.com/apple/swift-evolution/blob/main/process.md).  It provides guidance for workgroups on how to decide which proposals should be reviewed, how to select a review manager to guide a review, and what options are available after a review and how to reach a decision between them.  It also provides guidance for review managers on their specific role and responsibilities during a review.
+This document lays out the detailed process used by Swift evolution workgroups (such as the [Language Steering Group](https://www.swift.org/language-steering-group)) to take proposals through the [process of evolution review](https://github.com/apple/swift-evolution/blob/main/process.md).  It provides guidance for workgroups on how to decide which proposals should be reviewed, how to select a review manager to guide a review, and what options are available after a review and how to reach a decision between them.  It also provides guidance for review managers on their specific role and responsibilities during a review.
 
 This is intended to be a companion document to a pair of documents directed at other audiences.  The first, tentatively titled "Evolution Overview and Guidelines for Community Members”, is intended for community members who are interested in participating in a pitch or evolution review authored by someone else.  Readers of this document will be expected to have read that document first; however, it has not yet been written.  The second, tentatively titled "Evolution Guidelines for Proposal Authors", is intended for community members interested in bringing their own proposal through the evolution process.  Readers of this document will not expected to have read that document, or vice-versa; it has also not yet been written.
 
-Evolution reviews are associated with a particular workgroup that is responsible for guiding the evolution of that part of the Swift project. For the language and standard library, this is the [Language Workgroup](https://www.swift.org/community/#language-workgroup); other areas may be assigned to other workgroups.  The [Core Team](https://swift.org/community/#core-team) may act as the associated workgroup when an evolution review is desired but there isn't a more specific workgroup for that part of the project.  Hereafter in this document, the general term *workgroup* should be understood to be the associated workgroup for the specific proposal under consideration.
+Evolution reviews are associated with a particular workgroup that is responsible for guiding the evolution of that part of the Swift project. For the language and standard library, this is the [Language Steering Group](https://www.swift.org/language-steering-group); other areas may be assigned to other workgroups.  The [Core Team](https://swift.org/community/#core-team) may act as the associated workgroup when an evolution review is desired but there isn't a more specific workgroup for that part of the project.  Hereafter in this document, the general term *workgroup* should be understood to be the associated workgroup for the specific proposal under consideration.
 
 When a workgroup decides to consider a proposal for evolution review, it appoints a *review manager* to be its representative for that review. The review manager is typically a member of the workgroup. The review manager ensures the proposal meets the standards for review, handles review scheduling, writes public announcements about the review, oversees review discussion, compiles and summarizes review feedback for the workgroup’s deliberations, and conveys feedback from the workgroup to the authors. The rest of this document will describe all of these roles, as well as the process of selecting the review manager, in more detail.
 
 ## Summary of the review process
 
-Every proposal goes through several stages of review:
+Every proposal that's accepted goes through several stages of review:
 
-- A member of the workgroup performs *cursory review* on the open evolution PRs.
-- The cursory reviewer brings proposals to the workgroup for *full cursory review*.
-- The workgroup assigns a review manager who performs *preliminary review*.
+- Members of the workgroup perform *cursory review* individually on all the open evolution PRs.
+- The workgroup performs the collective *workgroup cursory review* on a specific proposal.
+- The workgroup assigns the proposal a review manager, who performs *preliminary review*.
 - The review manager presents the proposal to the workgroup for *preflight review*.
 - The review manager presents the proposal to the community for *open review*.
-- The review manager presents the proposal to the workgroup for final review*.
+- The review manager presents the proposal to the workgroup for *final review*.
+
+The workgroup may choose to reject proposals at any stage in this process. This decision is always made by the full workgroup.
 
 ## Criteria for open review
 
@@ -41,13 +43,13 @@ A proposal author formally indicates that they would like the Swift project to i
 
 Since most evolution proposals are associated with the Language Steering Group, the LSG is primarily responsible for monitoring this repository and informing other workgroups that there is a proposal for them to perform a cursory review of.
 
-Cursory review is meant to be a lightweight and informal process. Often different people will do different parts of the review, or it may be done collectively by the workgroup. As long as the goals are met and proposals are getting regular attention, the cursory review process is working.
+Cursory review is meant to be a lightweight and informal process. This document describes it as if it's done by a single member of the workgroup and then formally brought to the full workgroup's attention for a second round of review, but that's often not how it plays out: different people may do different parts of the review, or the workgroup may just talk about it collectively at a meeting. As long as the goals are met and proposals are getting regular attention, the cursory review process is working.
 
-This section will address the reader ("you") as if you were performing a cursory review by yourself.
+This section will address the reader ("you") as if you were performing a cursory review as an individual, but it's the same process when the workgroup does it collectively.
 
 ### Cursory review process
 
-You perform cursory review by briefly looking at the proposal's pitch, proposal document, and implementation, and evaluating them for the four criteria for open review. You then add the appropriate label on the proposal PR. When the proposal is ready, you bring it up with the full workgroup for the full cursory review.
+You perform cursory review by briefly looking at the proposal's pitch, proposal document, and implementation, and evaluating them for the four criteria for open review. You then add the appropriate label on the proposal PR. When the proposal is ready, you bring it up for a cursory review by the full workgroup.
 
 The following PR labels are available, but you may use other labels as needed:
 
@@ -71,9 +73,9 @@ The following PR labels are available, but you may use other labels as needed:
 
   It's the workgroup's responsibility to make sure the implementation review is performed and then relabel the proposal PR. If you put this label on a proposal, you should find someone to make sure the review is actually happening and periodically follow up with them.
 
-- `workgroup: ready` means that the proposal is ready to be considered by the rest of the workgroup as the full cursory review. See the "Full cursory review" section below.
+- `workgroup: ready` means that the proposal is ready to be considered by the full workgroup. See the "Workgroup cursory review" section below.
 
-If you feel that a proposal should simply be rejected without further review, you should bring it up to the workgroup immediately for full cursory review. You don't need to assign it a label.
+If you feel that a proposal should simply be rejected without further review, you should bring it up to the workgroup immediately for workgroup cursory review. You don't need to assign it a label.
 
 During cursory review, the standard for the four criteria for open review is relatively low. This is because the review manager will be doing a more thorough evaluation if the proposal advances. For example, if you've been reading the pitch thread and feel that there's a major concern that hasn't yet been addressed in the proposal, that's a good reason to not advance it yet; but there's no need to read over the whole pitch thread looking for unaddressed items, because the review manager will be doing that. Similarly, the review manager can work with the proposal author to improve the argumentation in the proposal document, and cursory review should be focused on whether the document is close enough for that engagement to be a good use of time.
 
@@ -113,13 +115,13 @@ That said, the provided implementation doesn't need to be ready to commit as soo
 
   Workgroups should exercise prudence when requesting performance testing on proposal implementations. Meaningful performance testing often requires ad hoc test development in order to properly reveal the impact of the proposal; simply running the existing build or runtime benchmarks may not be sufficient. If code maintainers believe that the proposed implementation is specifically prone to performance risks, then this testing should be done; but to avoid mounting burdens on the proposal authors, it should not be requested simply as a matter of course.
 
-## Full cursory review
+## Workgroup cursory review
 
-When a workgroup talks about a proposal that doesn't have a review manager yet, that is a *full cursory review*. Essentially, the workgroup performs a cursory review using their collective experience with the proposal.
+When a workgroup talks about a proposal that doesn't have a review manager yet, that is a *workgroup cursory review*. Essentially, the workgroup performs a cursory review using their collective experience with the proposal.
 
-If a member of the workgroup has performed an individual cursory review and thinks that the workgroup should made a final decision on the proposal (i.e. that it is either ready for review or should be rejected), they should ensure it is promptly brought up for full cursory review.
+If a member of the workgroup has performed an individual cursory review and thinks that the workgroup should made a final decision on the proposal (i.e. that it is either ready for review or should be rejected), they should ensure it is promptly brought up for workgroup cursory review.
 
-There are three primary outcomes of a full cursory review:
+There are three primary outcomes of a cursory review by the full workgroup:
 
 - There is substantial agreement in the workgroup that the proposal can be rejected without further review. The workgroup should pick someone to make an official statement explaining why; typically, this statement will be made in the pitch thread. The proposal PR can then be closed with a reference to the statement. See the "Rejecting a proposal without a review" section below.
 
