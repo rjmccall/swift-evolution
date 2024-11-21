@@ -1,6 +1,6 @@
-# A Vision for Accessors in Swift
+# A Prospective Vision for Accessors in Swift
 
-Swift properties are implemented by providing one or more “accessors” which are able to provide or update the value of a property.  Most Swift developers should be familiar with the `get` and `set` accessors that are used to implement computed properties:
+Swift properties and subscripts can be implemented by providing one or more "accessors" that retrieve or update the value. Most Swift developers are familiar with the `get` and `set` accessors that are used to define computed properties:
 
 ```swift
 struct Foo {
@@ -11,65 +11,172 @@ struct Foo {
 }
 ```
 
-In this case, the `get` accessor gets compiled into a special kind of method that returns a value, the `set` accessor gets compiled into a method that accepts a new value as an argument.  Reading or writing such a property is compiled into a call to the corresponding method.  Swift provides resilience for stored properties by automatically generating `get` and `set` accessor methods so that clients can be compiled the same way regardless of whether the property is actually written as a stored or computed property.
+In this case, the `get` accessor behaves just like a normal method that returns a value of the property's type, while the `set` accessor behaves just a normal method that receives a value of the property's type as an argument.
 
-> The description of “methods” here explains what happens when you access resilient stored properties that are defined in a separate module.  When accessing stored properties from within the *same* module, Swift typically uses efficient direct property access.
+The `get` and `set` accessors are ideal for implementing operations that copy the current value of the property:
 
-However, `get` and `set` accessors have significant limitations.  For example, because the `get` and `set` accessors transfer the value as a method argument or return value, they generally require the value to be copyable, which is no longer universally true in Swift.  This copying also adds significant overhead for large or complex values.  As an additional complication, more complex APIs, such as the subscript access for `Dictionary`, need to construct a temporary value and then clean up that value at the end of the access.
+```swift
+let copy = myFoo.value  // calls the get accessor for Foo.value
+```
 
-These limitations have led Swift to add a variety of other accessors, including several experimental forms that have never been officially standardized through the Swift Evolution process.  Recent work on noncopyable support and an expanded interest in new kinds of collections has made it important to provide a complete standard set of accessors to support future work.  This document will explain the various accessors that currently exist or might be proposed in the near future and how they will provide the full set of capabilities needed for different applications.
+or that overwrite the current value of the property:
 
-> Note:  Accessors are also used to implement subscripts; the only real difference is that a subscript operation can have additional arguments.  This document will discuss property accesses and subscript operations interchangeably.
+```swift
+myFoo.value = 51        // calls the set accessor for Foo.value
+```
+
+Other kinds of operations can also be compiled in terms of `get` and `set`. For example, if you pass a computed property as an `inout` argument:
+
+```swift
+myFoo.value += 10
+```
+
+Swift will use `get` to initialize a temporary variable, pass that variable as the argument, and then write the new value back with `set`:
+
+```swift
+var tmp = myFoo.value   // calls the get accessor for Foo.value
+tmp += 10
+myFoo.value = tmp       // calls the set accessor for Foo.value
+```
+
+However, this approach has significant problems. The biggest is that the `get` accessor has to return an independent value. If the accessor is just returning a value stored in memory, which is very common for data structures, this means the value has to be copied. This is unfortunate on three levels:
+
+1. It adds the runtime performance and memory overhead of copying the inline representation of the value. For example, if the value is an `Array`, the internal buffer of the array must be retained.
+
+2. It can make subsequent uses of the value less efficient. For example, if the value uses a copy-on-write representation like `Array` and `String` do, mutating a copy is likely to dramatically less efficient than mutating a variable in place. (We will explain this in more detail later.)
+
+3. It requires the value to be copyable at all, and so it inherently cannot work for values of non-`Copyable` type.
+
+These problems are amplified when properties and subscripts need to be abstracted over. When Swift knows exactly how a declaration is implemented, the compiler can access it in the best way possible given the implementation. For example, if Swift can see that a property is stored, it can emit code to directly access that memory instead of calling an accessor. However, when Swift doesn't know how the declaration is implemented, it must call some kind of accessor instead, and so it is limited by the capabilities of that accessor.
+
+This kind of abstraction is necessary in several common situations:
+
+- when the declaration is being accessed through a protocol requirement,
+- when the declaration is a non-`final` member of a class, or
+- when the declaration is from a different library that's been built with library evolution enabled.
+
+For example, suppose we have this code:
+
+```swift
+struct Person: Nameable {
+  var name: String
+}
+
+protocol Nameable {
+  var name: String { get }
+}
+
+printNameConcretely(_ person: Person) {
+  print(person.name)
+}
+
+printNameGenerically(_ person: any Nameable) {
+  print(person.name)
+}
+```
+
+In `printNameConcretely`, Swift knows that `name` is a stored property of `Person`, and it can just load that value directly from `person` and pass it to `print`. In `printNameGenerically`, Swift does not know how `name` is implemented, and it must call a `get` accessor to copy the current value of the name. To avoid those costs, the Swift optimizer would have to specialize this function for the specific type that is being passed in; this is something that Swift can and does do, but only as a best-effort optimization, which is not always good enough. And, of course, this code would be ill-formed if `String` were a non-`Copyable` type, because the only way to satisfy a `get` requirement for a stored property is to copy the current value.
+
+As a result, Swift has explored a variety of other accessors throughout its history, none of which have ever been officially added to the language through the Swift Evolution process. (The observing accessors, `willSet` and `didSet`, are officially in the language but are arguably in a different category because they don't serve as complete operations.) Many of these have been adopted in the standard library for years, but we've been reluctant to make them official because they are variously incomplete, unsafe, or complex.
+
+This vision document lays out the design space of accessors for the next few years, as Swift continues to advance its support for non-`Copyable` and non-`Escapable` types. It explains Swift's basic access model and how it may need to evolve. It explores what developers need from accessors in these advanced situations. Finally, it discusses different kinds of accessors, both existing and under consideration, and how they do or not fit into the future of the language as we see it.
+
+This is a prospective vision which has not yet been reviewed by the Language Steering Group. Even if it is approved by the Language Steering Group in exactly this form, it is merely laying out a high-level vision for the language design and does not constitute pre-approval of any specific ideas in this document. Everything in this document will need to be separately proposed and reviewed under the normal Swift Evolution process before it is part of the Swift language.
+
+## Swift's access model
+
+Swift's access model was first described during the development of Swift 4 in the [ownership manifesto](https://github.com/swiftlang/swift/blob/main/docs/OwnershipManifesto.md). This section will repeat that model using the conventional terminology, but with some clarifications and notes.
+
+Swift provides two kinds of *storage declaration*: `var`s and `subscript`s. From this perspective, `let` is just a special kind of `var` which cannot be modified and cannot have accessors. A property is just a special name for a `var` or `let` that's defined as a member of a type. `var`s and `subscript`s are referenced very differently in the syntax, but semantically they work very similarly, especially with respect to accessors.
+
+A reference to a storage declaration is a *storage reference expression*. A storage reference expression for a `var` or `let` is just the name of the declaration, either standalone (e.g. `value`) or as a member of a base expression (e.g. `base.value`. A storage reference expression for a `subscript` is the indexing operator `[ ... ]` applied to a base expression with any appropriate index expressions (e.g. `base[i]`).
+
+Every storage reference expression performs a specific kind of access, which is determined contextually from how the expression is used. Historically, we have said that there are three kinds of access: *reads*, *assignments*, and *modifications*.
+
+A read access conceptually means that the current value of the storage is being read without changing it. A storage reference expression that is written in any position other than those below is a read access. For example, in `print(x)`, there is a read access to the storage reference expression `x`.
+
+An assignment (or write) access conceptually means that the storage is being completely overwritten with a new value. It primarily occurs when the expression is the direct target of the `=` assignment operator. For example, in `base.value = 10`, there is a write access to the storage reference expression `base.value`.
+
+A modification (or update) access conceptually means that the storage is being both read and written. It occurs when:
+- a storage reference expression is passed as an `inout` argument, including as the left operand of a compound assignment operator like `+=`; or
+- a storage reference expression is the base expression of another storage reference expression that must mutate its base in order to perform its own requested access. For example, in `base.value = 10`, the access to `base` is:
+  - a modification if `value` is a stored property of a value type,
+  - a modification if `value` is defined with a `mutating set`,
+  - a read if `value` is a stored property of a reference type, or
+  - a read if `value` is defined with a `nonmutating set`.
+
+The old manifesto's description of modification and assignment accesses has stood up to time, but its description of read accesses arguably has not. As more advanced ownership features have developed in the language, Swift has increasingly needed to distinguish at least two kinds of reads:
+
+A *copying read access* conceptually means that the current value of the storage is being copied (or consumed) to produce an independent value. At minimum, it occurs when the storage reference expression appears in any context where an independent value is required, such as a return value or as the right operand of the `=` operator.
+
+A *borrowing read access* conceptually means that the current value of the storage is being temporarily borrowed in order to read it without copying it. At minimum, it occurs when the storage reference expression is appears in any context where an implicit copy is not allowed, such as passing it as a `borrowing` argument when the value is non-`Copyable`.
+
+The semantic and implementation-level differences between borrowing and copying/consuming uses will be very important in this document.
+
+It is reasonable to ask whether Swift could categorize *all* read accesses into these two kinds based on context, the same way that it distinguishes reads from assignments. This would be straightforward at a technical level, but it is controversial as a design direction because the most obvious definitions would be very aggressive about borrowing values. This could cause surprising semantic problems for Swift programmers, especially those working extensively with classes, and it could break the behavior of existing code. This remains an open question that this vision does not take a stand on.
 
 ## Two Dimensions of Access
 
-There are a wide variety of theoretically possible accessors, varying in what kind of access they provide and what mechanism they use to provide it.  Different programming languages support different combinations.  For Swift, there are three fundamental kinds of access that we are interested in:
+To summarize the previous section, there are four basic kinds of access:
 
-* Read access.
-* Write or “set” access.
-* Update access.
+- copying reads (producing an independent value equivalent to the current value)
+- borrowing reads (allowing temporary use of the current value)
+- modifications (updating the current value in place)
+- assignments (replacing the current value with a new, independent value)
 
-Write and update access differ in that write access can create a value that did not exist before, while update access requires there be a pre-existing value.  For example, consider how the write operation on an expandable collection `someCollection["newKey"] = 17` can create a value that did not exist before. In contrast, an update such as `someCollection["existingKey"] += 1` is modifying a value that must necessarily already exist.
+We can implement accesses to storage in a wide variety of ways, and each of them could give rise to a different kind of accessor. It's reasonable to look for a general pattern that all accessors of a particular access kind would have to follow. To do this, we can observe that every access can be split into three phases:
+1. The implementation does something to set up for the access.
+2. The client code does whatever it's going to do during the access.
+3. The implementation possibly does something to finalize the access.
 
-For each kind of access, there are multiple ways that the access might be provided.  The Swift implementation today supports three different possible mechanisms, although not all of these are currently supported by accessors:
+For example, if we call a `mutating` method on a stored property of a `struct`:
+1. The "implementation" of the property adds the correct offset to the base address of the struct to derive the address of the stored property.
+2. The client code passes that address as `self` to the `mutating` method.
+3. Nothing has to be done dynamically to finalize the access.
 
-* Copying.  The value might be copied between the caller and the callee.
-* Borrowing.  The callee might provide access to the value without actually copying it.  This can be implemented by having the callee provide a pointer or reference to an existing, initialized storage location for the value -- the caller can then use this reference to read and/or write the value.
-* Yielding.  Each of the above is typically provided by calling a function.  The value or pointer is passed as an argument or return value from that function.  It’s also possible for the callee to start a *coroutine* whose execution is interleaved with that of the caller.  This allows the callee to resume after the caller is finished, which is not possible for a function- or method-based accessor.
+Similarly, if we call a `mutating` method on an element of an `Array`:
+1. The implementation of `Array.subscript` ensures that the array buffer is uniquely referenced, then derives the address of the element.
+2. The client code passes that address as `self` to the `mutating` method.
+3. Nothing has to be done dynamically to finalize the access.
 
-## Six of Nine Fundamental Accessors
+These two examples have a common characteristic: the implementations do not need to do any dynamic finalization of the access. This turns out to be very important for practical purposes.
 
-Combining the possibilities above gives us a 3x3 matrix of possible accessors.
-Three of these combinations, however, turn out to be either impossible or not useful:
+For one, it is very common when using value semantics. If a storage declaration is implemented by just keeping the value somewhere in memory, and exclusivity for that memory is guaranteed statically by the exclusivity of the containing value, there's nothing to do as finalization. This covers stored properties of value types and the vast majority of data structures.
 
-|              |Read   |Write  |Update |
-|---           |---    |---    |---    |
-|**Copying**   |       |       |✗      |
-|**Borrowing** |       |✗      |       |
-|**Yielding**  |       |✗      |       |
+But it's also really useful because it frees the client of the burden of running code when the access ends. The general pattern that we described above has to run in two distinct phases. That makes it inherently something like a coroutine: it's going to be split into multiple functions, and it might have to dynamically allocate memory to pass between them. The client must then keep all of this information around dynamically for each access it performs. If the client starts a dynamic number of accesses at once, it will need dynamic allocation to remember all of the active accesses. In contrast, if finalization is guaranteed to be trivial, the implementation of the access can work more like a normal function: the function will just perform the first phase and pass back whatever it needs to as a return value. The client has nothing to track, so it can manage even a dynamic number of accesses completely statically.
 
-* “Copying Update” is unnecessary.  A copying update would by definition copy the value into the caller and then copy the updated value back, which is easily achieved by using a “Copying Read” followed by a “Copying Write”
-* “Borrowing Write” and “Yielding Write” are simply impossible.  Both borrowing and yielding require an existing value.  As such, they provide “update” access.
+## Six of Eight Fundamental Accessors
+
+So we have four kinds of access, and we can classify accessor implementations by whether they need to be coroutines. That gives us a 2x4 matrix of possible accessors. Two of these combinations, however, turn out to not be useful:
+
+|              |Copying read |Borrowing read |Modification|Assignment |
+|---           |---          |---            |---         |---        |
+|**Routine**   |             |               |            |           |
+|**Coroutine** |✗            |               |            |✗          |
+
+A copying read access has to generate an independent value during the first phase. Given that, it's unclear what a copying read accessor could possibly need to do during finalization. If there's some sort of cleanup it has to do, and after the cleanup the value shouldn't be used, then the value wasn't really independent in the first place.
+
+An assignment access just consumes an independent value. Just like above, it's unclear what an assignment accessor could possibly need to do that would require it to be split into multiple phases.
 
 ## Existing and Proposed Standard Accessors
 
 Based on the discussion above, we are left with six combinations that are both possible and useful.  The following table gives each one a name:
 
-|              |Read   |Write |Update |
-|---           |---    |---   |---    |
-|**Copying**   |get    |set   |✗      |
-|**Borrowing** |borrow |✗     |mutate |
-|**Yielding**  |read   |✗     |modify |
+|              |Copying read |Borrowing read |Modification|Assignment |
+|---           |---          |---            |---         |---        |
+|**Routine**   |get          |borrow         |mutate      |set        |
+|**Coroutine** |✗            |read           |modify      |✗          |
 
 Some of the above exist in the current Swift language, others we expect to be proposed in the near future.  Here is a slightly more detailed explanation of each one:
 
-* `get` and `set` - These are the original standard accessors, which compile into methods that return or accept a value of the indicated type.
-* `borrow` and `mutate` - These borrowing accessors are not yet implemented, but we expect to propose them for Swift Evolution at some point in the future.  These provide access to the value without copying by relying on Swift’s “borrow” implementation which avoids pointer overhead for simple types.  In particular, these can be used for non-copyable and non-escapable values.  (In various discussions, the proposed `mutate` accessor has been called `inout`.)
-* `read` and `modify` -  These exist today as experimental `_read` and `_modify` implementations and we expect to propose a revised final form without the underscored names in the near future. They compile into coroutines that “yield” the value.  In effect, each such accessor becomes two functions:  The “top half of the coroutine” creates a value if necessary and then provides the caller with a pointer to this value.  The “bottom half of the coroutine” cleans up the value.  In effect, callers invoke the top half to obtain a pointer to the value, use the pointer to read and/or modify the value, then call the bottom half to give the property a chance to clean itself up.
+* `get` and `set` - These are the original standard accessors. They are effectively just normal functions that return or accept an independent value of the value type.
+* `borrow` - This accessor is not yet implemented, but we expect to propose it for Swift Evolution at some point in the future. It is effectively just a normal function that returns a borrowed value, using Swift's existing representation that avoids pointer overhead for simple types. Swift will have to prove that the returned value can be safely borrowed without finalization and with the right lifetime.
+* `mutate` - This accessor is not yet implemented, but we expected to propose it for Swift Evolution at some point in the future. In various discussions, it has sometimes been called `inout`. It is effectively just a normal function that returns the address of a mutable value. Swift will have to prove that the returned address has the right lifetime.
+* `read` and `modify` -  These exist today as experimental `_read` and `_modify` implementations, and we expect to propose a revised final form without the underscored names in the near future. They compile into coroutines that “yield” the value. In effect, each such accessor becomes two functions, each performing one phase of the implementation as discussed above.
 
-In the process of developing the above, a number of other approaches have been explored.  Some of the following are currently supported in the compiler, but none are expected to go through Swift Evolution
+In the process of developing the above, a number of other approaches have been explored.
 
-* `unsafeAddress` and `unsafeMutableAddress` - These are implemented but are not expected to ever go through Swift Evolution.  They compile into methods that return a pointer to the value in question.  This pointer value is explicit in the property implementation but is not visible in the Swift source code of the client.  This does not require copying the value, but does require that the value already be present somewhere in memory.  This was an early form of the idea behind `borrow` and `mutate` but based on unsafe constructs.
+* `unsafeAddress` and `unsafeMutableAddress` - These are implemented but are not expected to ever go through Swift Evolution. They compile into methods that return a pointer to the value in question. This pointer value is explicit in the property implementation but is not visible in the Swift source code of the client. This does not require copying the value, but does require that the value already be present somewhere in memory.  This was an early form of the idea behind `borrow` and `mutate`, but it is based on unsafe constructs.
 * `unsafeRawAddress` and `unsafeRawMutableAddress` - These are not yet implemented and may not ever go through Swift Evolution.  These are similar to the above but allow the property implementation to work directly with an untyped “raw” pointer while the caller sees an access to typed data in memory.  This document will refer to these and the previous two collectively as `unsafe*Address`.
 * `_read` and `_modify` - These were the early experimental forms of `read` and `modify`.  They will likely continue to be supported in order to avoid breaking existing code, but users should migrate to `read` and `modify` once they are finalized.
 
