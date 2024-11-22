@@ -181,18 +181,6 @@ In principle, since a function can return a non-`Copyable` type, there's no reas
 
 The `set` accessor is the natural most-general model of an assignment access. It is an ordinary function that takes a new independent value as an argument and conceptually replaces the current value of the storage with it. The value is taken as a `consuming` argument, so the `set` accessor generalizes perfectly well to non-`Copyable` value types.
 
-When combined with an implementation of a copying read access (a `get`), `set` can be used to synthesize an implementation of a modification access:
-
-```swift
-var temporary = get()  // copy the current value of the storage
-temporary.mutate()     // allow the client to do its modification
-set(consume temporary) // replace the current value of the storage
-```
-
-This synthesized modification access requires a coroutine model because the call to `set` is a non-trivial finalization.
-
-Because this synthesis requires a copying read access, it generally doesn'y work for non-`Copyable` value types. (It can work if the storage declaration provides a `get`, but such an accessor usually can't be defined unless it's `consuming`, which would prevent the `set` from being called later.) To support modification in this case, a storage declaration must generally also define one of the modification accessors.
-
 A storage declaration can usefully define both a `set` accessor and a modification accessor. Assignment accesses will just call `set`, allowing them to bypass any overhead that might be associated with reading the current value. Modification accesses will ignore the `set` and just use the modification accessor. However, if there isn't any overhead for reading the current value --- for example, if the value is already stored in memory somewhere --- then this is unlikely to be a useful optimization over just defining a non-coroutine modification accessor.
 
 ### `read` and `borrow`
@@ -202,20 +190,6 @@ The `read` accessor is the natural most-general model of a borrowing read access
 The `borrow` accessor is a specialization of that model which expresses that no finalization is required. It is an ordinary function that returns a borrowed value. Swift should be able to return borrowed value without adding pointer indirection for simple types. The compiler must prove that the borrow is valid within some some that encloses the call to the accessor.
 
 Both of these accessors naturally work for non-`Copyable` value types.
-
-A copying read accessor (`get`) can be used to synthesize the implementation of a borrowing read accessor:
-
-```swift
-let temporary = get()   // copy the current value of the storage
-yield temporary         // allow the client to read the value
-_ = consume temporary   // destroy the copy
-```
-
-This synthesized implementation generally requires a coroutine because the temporary must be destroyed and deallocated as a finalization step. This synthesis also generally doesn't work for non-`Copyable` value types because storage declarations of such types typically cannot provide a `get` in the first place. Such declarations must define some kind of borrowing read accessor.
-
-If the value type is `Copyable`, a borrowing read accessor can be used to synthesize an implementation of a `get` accessor by borrowing the value, copying it, and then immediately ending the borrow.
-
-A `borrow` accessor can be used to synthesize an implementation of a `read` accessor by just yielding the borrowed value returned by the `borrow` accessor and then do nothing in the finalization stage.
 
 Swift has long had experimental support for `read` accessors using the unofficial spelling `_read`. There is currently a proposal being pitched to add these accessors officially to the language with the name `read`; there are some other small differences, but mostly the behavior is the same. We are also exploring a more efficient implementation approach for `read` than that used by `_read`.
 
@@ -230,8 +204,6 @@ The `modify` accessor is the natural most-general model of a modification access
 The `mutate` accessor is a specialization of that model which expresses that no finalization is required. It is an ordinary function that returns a reference to mutable memory. The compiler must prove that the access to that memory is exclusive within some scope that encloses the call to the accessor.
 
 Both of these accessors naturally work for non-`Copyable` value types.
-
-A `mutate` accessor can be used to synthesize an implementation of a `modify` accessor by just yielding the reference returned by the `mutate` accessor and then do nothing in the finalization stage.
 
 Swift has long had experimental support for `modify` accessors using the unofficial spelling `_modify`. There is currently a proposal being pitched to add these accessors officially to the language with the name `modify`; there are some other small differences, but mostly the behavior is the same. We are also exploring a more efficient implementation approach for `modify` coroutines than that used by `_modify`.
 
@@ -370,6 +342,74 @@ let v2 = v.dropOldest
 Note that `consuming` makes no sense for setters — there is no point to changing a property on a value and then immediately ending the lifetime of that value.  Similarly, `consuming` makes no sense for `borrow` or `unsafeAddress` accessors — those require that the containing value survive for the duration of the returned borrow access or address, so it does not make sense to explicitly terminate the value lifetime immediately.
 
 This only leaves `consuming get` and `consuming read` as meaningful combinations.  A `consuming get` can be used for operations such as the `dropOldest` example above that model a transformation by creating a new value and terminating the old one.  The `consuming read` variant can be used similarly.  Unlike `borrow`, the `read` operation coroutine structure forces the containing value to live for a certain period of time, the value is consumed only at the end of that coroutine.
+
+### Implementing access kinds with other accessors
+
+Accessors can often be used to perform other kinds of access than they naturally implement. Effectively, this involves synthesizing some other kind of accessor, although the compiler often prefers to emit the appropriate code inline at use sites instead of actually creating and calling a synthetic function.
+
+This synthesis is important to understand when abstraction is required. For example, suppose a type has a property which is used to satisfy a protocol requirement that expects `read`, `modify`, and `set` accessors. The protocol conformance for the type must synthesize these accessors in terms of the actual implementation of the property. If the synthesis isn't possible, Swift must reject the conformance and report the problem to the programmer.
+
+Every kind of accessor can be synthesized efficiently for a stored variable *except* that `get` requires the value type to be `Copyable`.
+
+When the storage declaration is an instance member of a value type, the ownership requirement of a synthesized accessor must be compatible with all of the accesses that the synthesis requires:
+- If any of the accesses requires consuming `self`, it must be the last access performed to `self`, and the synthesized accessor must itself be `consuming`.
+- If any of the accesses requires mutating `self`, the synthesized accessor must be `consuming` or `mutating`.
+
+#### `get`
+
+If the value type is `Copyable`, either kind of borrowing read accessor can be used to synthesize a `get` accessor by borrowing the value, copying it, and then immediately ending the borrow.
+
+When synthesizing `get` using a `borrow` accessor, which must return a value borrowed out of memory that will outlive the accessor, this is very likely to be just as efficient as a direct implementation would have been. The synthesized `get` is just performing the copy *after* the return rather than *before* it, which should make no real difference to performance.[^2]
+
+[^2]: It *could* be less efficient if putting the value in borrowable memory is an avoidable step. For example, if the `borrow` is actually generating new values on each access, but must allocate memory to store the value so it can be borrowed, a direct `get` implementation would be more efficient than copying the value returned by `borrow`. That would be a very questionable implementation of `borrow`, however; it should really just be a `get` to begin with.
+
+That is not as true when synthesizing `get` using a `read` accessor. For one, the low-level overhead of setting up the `read` coroutine could be avoided by a direct `get` implementation. Additionally, however, a `read` coroutine is more likely to be setting up a borrow out of temporary memory, which is work that a `get` accessor could avoid by just returning the desired value directly.
+
+#### `set`
+
+A `set` accessor can be synthesized using either kind of modification accessor. There are no restrictions on this synthesis.
+
+When synthesizing `set` using a `mutate` accessor, which must return a reference to stable, mutable memory, this is very likely to be just as efficient as a direct implementation would have been. The synthesized `set` is just performing the assignment *after* the return rather than *before* it. Any exception is likely to be something that shouldn't have been implemented with `mutate` in the first place because the value shouldn't really be guaranteed to be in stable memory.
+
+This is less true when synthesizing `set` using a `modify` accessor. For one, the low-level overhead of setting up the `modify` coroutine could be avoided by a direct `set` implementation. Additionally, a `modify` coroutine is more likely to be setting up a mutation of temporary memory and then doing arbitrary work with the value afterwards. A direct implementation of `set` could avoid the need for the temporary, avoiding both some low-level overhead and the entire step of reading the current value only for it to be completely overwritten.
+
+#### `read` and `borrow`
+
+The borrowing read accessor `read` can be synthesized using the copying read accessor `get`:
+
+```swift
+let temporary = get()   // copy the current value of the storage
+yield temporary         // allow the client to read the value
+_ = consume temporary   // destroy the copy
+```
+
+This synthesized implementation requires a coroutine because the temporary must be destroyed and deallocated as a finalization step. It therefore can only be used to synthesize `read` and not `borrow`.
+
+This synthesis usually doesn't work for non-`Copyable` value types because storage declarations of non-`Copyable` type typically cannot provide a `get` in the first place.
+
+`read` can also be synhesized using `borrow`: the coroutine calls `borrow`, yields the result, and does nothing in the finalization stage.
+
+A `borrow` accessor can only be synthesized using a stored variable or an accessor with an equivalent lifetime guarantee to `borrow`, like `unsafe*Address`.
+
+#### `modify` and `mutate`
+
+A `modify` accessor can be synthesized using `get` and `set`:
+
+```swift
+var temporary = get()  // copy the current value of the storage
+temporary.mutate()     // allow the client to do its modification
+set(consume temporary) // replace the current value of the storage
+```
+
+This synthesized modification access requires a coroutine model because the call to `set` is a non-trivial finalization step.
+
+Note that the `get` can itself be synthetic in this synthesis. For example, if the original storage declaration provides a `borrow` and a `set`, the `get` can be synthesized in terms of the `borrow`, and then the `modify` can be synthesized in terms of the `set` and the synthesized `get`. Any requirements for synthesizing the `get` also apply to synthesizing the `modify`; in particular, the value type must be `Copyable`.
+
+Because this synthesis requires a `get`, it generally doesn'y work for non-`Copyable` value types. (It could work if the storage declaration provides a `get`, but such an accessor usually can't be defined unless it's `consuming`, which would prevent the `set` from being called later.) To support modification, a storage declaration of non-`Copyable` type must generally also define either `modify` or `mutate`.
+
+A `modify` accessor can also be synthsized using `mutate` by just yielding the reference returned by the `mutate` accessor and then doing nothing in the finalization stage.
+
+A `mutate` accessor can only be synthesized using a stored variable or an accessor with an equivalent lifetime guarantee to `mutate`, like `unsafe*MutableAddress`.
 
 ## Some Observations
 
