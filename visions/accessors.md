@@ -89,6 +89,8 @@ Swift's access model was first described during the development of Swift 4 in th
 
 Swift provides two kinds of *storage declaration*: `var`s and `subscript`s. From this perspective, `let` is just a special kind of `var` which cannot be modified and cannot have accessors. A property is just a special name for a `var` or `let` that's defined as a member of a type. `var`s and `subscript`s are referenced very differently in the syntax, but semantically they work very similarly, especially with respect to accessors.
 
+The *value type* of a storage declaration is the type of the value it presents to clients. In a `var` or `let`, it is the declared (or inferred) type of the variable. Reference ownership modifiers like `weak` and `unowned` are not part of the value type. In a `subscript`, it is the "return type" of the subscript's signature. Subscript indices must be provided in order to use the subscript, and they are available to the accessors that implement it, but they have no special role in how accesses work in the language.
+
 A reference to a storage declaration is a *storage reference expression*. A storage reference expression for a `var` or `let` is just the name of the declaration, either standalone (e.g. `value`) or as a member of a base expression (e.g. `base.value`. A storage reference expression for a `subscript` is the indexing operator `[ ... ]` applied to a base expression with any appropriate index expressions (e.g. `base[i]`).
 
 Every storage reference expression performs a specific kind of access, which is determined contextually from how the expression is used. Historically, we have said that there are three kinds of access: *reads*, *assignments*, and *modifications*.
@@ -97,7 +99,7 @@ A read access conceptually means that the current value of the storage is being 
 
 An assignment (or write) access conceptually means that the storage is being completely overwritten with a new value. It primarily occurs when the expression is the direct target of the `=` assignment operator. For example, in `base.value = 10`, there is a write access to the storage reference expression `base.value`.
 
-A modification (or update) access conceptually means that the storage is being both read and written. It occurs when:
+A modification (or update, or read-write) access conceptually means that the storage is being both read and written. It occurs when:
 - a storage reference expression is passed as an `inout` argument, including as the left operand of a compound assignment operator like `+=`; or
 - a storage reference expression is the base expression of another storage reference expression that must mutate its base in order to perform its own requested access. For example, in `base.value = 10`, the access to `base` is:
   - a modification if `value` is a stored property of a value type,
@@ -115,7 +117,7 @@ The semantic and implementation-level differences between borrowing and copying/
 
 It is reasonable to ask whether Swift could categorize *all* read accesses into these two kinds based on context, the same way that it distinguishes reads from assignments. This would be straightforward at a technical level, but it is controversial as a design direction because the most obvious definitions would be very aggressive about borrowing values. This could cause surprising semantic problems for Swift programmers, especially those working extensively with classes, and it could break the behavior of existing code. This remains an open question that this vision does not take a stand on.
 
-## Two Dimensions of Access
+## Two Dimensions of Accessors
 
 To summarize the previous section, there are four basic kinds of access:
 
@@ -167,54 +169,168 @@ Based on the discussion above, we are left with six combinations that are both p
 |**Routine**   |get          |borrow         |mutate      |set        |
 |**Coroutine** |✗            |read           |modify      |✗          |
 
-Some of the above exist in the current Swift language, others we expect to be proposed in the near future.  Here is a slightly more detailed explanation of each one:
+Some of the above exist in the current Swift language, others we expect to be proposed in the near future.
 
-* `get` and `set` - These are the original standard accessors. They are effectively just normal functions that return or accept an independent value of the value type.
-* `borrow` - This accessor is not yet implemented, but we expect to propose it for Swift Evolution at some point in the future. It is effectively just a normal function that returns a borrowed value, using Swift's existing representation that avoids pointer overhead for simple types. Swift will have to prove that the returned value can be safely borrowed without finalization and with the right lifetime.
-* `mutate` - This accessor is not yet implemented, but we expected to propose it for Swift Evolution at some point in the future. In various discussions, it has sometimes been called `inout`. It is effectively just a normal function that returns the address of a mutable value. Swift will have to prove that the returned address has the right lifetime.
-* `read` and `modify` -  These exist today as experimental `_read` and `_modify` implementations, and we expect to propose a revised final form without the underscored names in the near future. They compile into coroutines that “yield” the value. In effect, each such accessor becomes two functions, each performing one phase of the implementation as discussed above.
+### `get`
 
-In the process of developing the above, a number of other approaches have been explored.
+The `get` accessor is the natural most-general model of a copying read access. It is an ordinary function that returns an independent value that is conceptually a copy of the current value of the storage.
 
-* `unsafeAddress` and `unsafeMutableAddress` - These are implemented but are not expected to ever go through Swift Evolution. They compile into methods that return a pointer to the value in question. This pointer value is explicit in the property implementation but is not visible in the Swift source code of the client. This does not require copying the value, but does require that the value already be present somewhere in memory.  This was an early form of the idea behind `borrow` and `mutate`, but it is based on unsafe constructs.
-* `unsafeRawAddress` and `unsafeRawMutableAddress` - These are not yet implemented and may not ever go through Swift Evolution.  These are similar to the above but allow the property implementation to work directly with an untyped “raw” pointer while the caller sees an access to typed data in memory.  This document will refer to these and the previous two collectively as `unsafe*Address`.
-* `_read` and `_modify` - These were the early experimental forms of `read` and `modify`.  They will likely continue to be supported in order to avoid breaking existing code, but users should migrate to `read` and `modify` once they are finalized.
+In principle, since a function can return a non-`Copyable` type, there's no reason a storage declaration with a non-`Copyable` value type couldn't provide a `get` accessor. In practice, however, this is generally either impossible or at least undesirably expensive. Non-`Copyable` types are typically non-`Copyable` because they represent some kind of unique ownership that cannot be duplicated without changing the meaning. These storage declarations generally cannot support a copying read access under any implementation.
+
+### `set`
+
+The `set` accessor is the natural most-general model of an assignment access. It is an ordinary function that takes a new independent value as an argument and conceptually replaces the current value of the storage with it. The value is taken as a `consuming` argument, so the `set` accessor generalizes perfectly well to non-`Copyable` value types.
+
+When combined with an implementation of a copying read access (a `get`), `set` can be used to synthesize an implementation of a modification access:
+
+```swift
+var temporary = get()  // copy the current value of the storage
+temporary.mutate()     // allow the client to do its modification
+set(consume temporary) // replace the current value of the storage
+```
+
+This synthesized modification access requires a coroutine model because the call to `set` is a non-trivial finalization.
+
+Because this synthesis requires a copying read access, it generally doesn'y work for non-`Copyable` value types. (It can work if the storage declaration provides a `get`, but such an accessor usually can't be defined unless it's `consuming`, which would prevent the `set` from being called later.) To support modification in this case, a storage declaration must generally also define one of the modification accessors.
+
+A storage declaration can usefully define both a `set` accessor and a modification accessor. Assignment accesses will just call `set`, allowing them to bypass any overhead that might be associated with reading the current value. Modification accesses will ignore the `set` and just use the modification accessor. However, if there isn't any overhead for reading the current value --- for example, if the value is already stored in memory somewhere --- then this is unlikely to be a useful optimization over just defining a non-coroutine modification accessor.
+
+### `read` and `borrow`
+
+The `read` accessor is the natural most-general model of a borrowing read access. It is a coroutine function which yields a borrowed value and can then do arbitrary finalization when resumed.
+
+The `borrow` accessor is a specialization of that model which expresses that no finalization is required. It is an ordinary function that returns a borrowed value. Swift should be able to return borrowed value without adding pointer indirection for simple types. The compiler must prove that the borrow is valid within some some that encloses the call to the accessor.
+
+Both of these accessors naturally work for non-`Copyable` value types.
+
+A copying read accessor (`get`) can be used to synthesize the implementation of a borrowing read accessor:
+
+```swift
+let temporary = get()   // copy the current value of the storage
+yield temporary         // allow the client to read the value
+_ = consume temporary   // destroy the copy
+```
+
+This synthesized implementation generally requires a coroutine because the temporary must be destroyed and deallocated as a finalization step. This synthesis also generally doesn't work for non-`Copyable` value types because storage declarations of such types typically cannot provide a `get` in the first place. Such declarations must define some kind of borrowing read accessor.
+
+If the value type is `Copyable`, a borrowing read accessor can be used to synthesize an implementation of a `get` accessor by borrowing the value, copying it, and then immediately ending the borrow.
+
+A `borrow` accessor can be used to synthesize an implementation of a `read` accessor by just yielding the borrowed value returned by the `borrow` accessor and then do nothing in the finalization stage.
+
+Swift has long had experimental support for `read` accessors using the unofficial spelling `_read`. There is currently a proposal being pitched to add these accessors officially to the language with the name `read`; there are some other small differences, but mostly the behavior is the same. We are also exploring a more efficient implementation approach for `read` than that used by `_read`.
+
+`borrow` accessors are not currently implemented, but we expect to propose them for Swift Evolution at some point in the future.
+
+### `modify` and `mutate`
+
+`modify` and `mutate` are both modification accessors.
+
+The `modify` accessor is the natural most-general model of a modification access. It is a coroutine function which yields a reference to mutable memory and can then do arbitrary finalization when resumed.
+
+The `mutate` accessor is a specialization of that model which expresses that no finalization is required. It is an ordinary function that returns a reference to mutable memory. The compiler must prove that the access to that memory is exclusive within some scope that encloses the call to the accessor.
+
+Both of these accessors naturally work for non-`Copyable` value types.
+
+A `mutate` accessor can be used to synthesize an implementation of a `modify` accessor by just yielding the reference returned by the `mutate` accessor and then do nothing in the finalization stage.
+
+Swift has long had experimental support for `modify` accessors using the unofficial spelling `_modify`. There is currently a proposal being pitched to add these accessors officially to the language with the name `modify`; there are some other small differences, but mostly the behavior is the same. We are also exploring a more efficient implementation approach for `modify` coroutines than that used by `_modify`.
+
+`mutate` accessors are not currently implemented, but we expect to propose them for Swift Evolution at some point in the future.
+
+### `unsafeAddress` and `unsafeMutableAddress`
+
+`unsafeAddress` is functionally a borrowing read accessor. It is an ordinary function that returns an `UnsafePointer<ValueType>`.
+
+`unsafeMutableAddress` is functionally a modification accessor. It is an ordinary function that returns an `UnsafeMutablePointer<ValueType>`.
+
+These accessors are early analogues of the `borrow` and `mutate` accessors built on unsafe foundations. The compiler implicitly dereferences the returned pointer to perform the access, with some special logic to keep the access to the base value (if there is one) active during the use of the pointer, which would otherwise cause immediate lifetime-safety problems.
+
+These are currently implemented in the compiler and are used in the standard library, but they're not expected to ever go through Swift Evolution. 
+
+### `unsafeRawAddress` and `unsafeRawMutableAddress`
+
+These are similar to the above, but they allow the implementation to work directly an untyped "raw" pointer while the caller sees an access to typed data in memory.
+
+These are not yet implemented and may not ever go through Swift Evolution. This document will refer to these and the previous two collectively as `unsafe*Address`.
 
 ## Distinguishing Features
 
-These accessors vary in how they treat both the property value and the containing value.  In this section, we’ll explore the forms that variation takes:
+Accessors vary in how they treat both the storage value and (where applicable) the containing value. In this section, we’ll explore how that affects their use in code.
 
-### Copying vs. Borrowing
+### Copying vs. borrowing
 
-A key distinction is whether a particular accessor copies the property value or whether it provides access to the value without copying it.  The `get` and `set` accessors copy the value by returning it as a method result or accepting it as a method argument.  Other accessors provide access to a value without copying:
+We've already discussed many of the differences between accessors that implement copying and borrowing reads. To summarize, all of these read accessors except `get` are designed to allow the value of the storage to be "borrowed": reading the information in the value without copying it to produce an independent value.
 
-*  `unsafe*Address` have the accessor provide an explicit pointer
-* `read`/`modify` *yield* access to a value from a coroutine.  This can be a directly stored value, or a constructed value stored temporarily in a coroutine execution frame.
-* `borrow` and `mutate` allow the client to *borrow* the value.  Following the existing Swift ABI rules, this may involve passing a pointer or “bitwise borrowing” the value to avoid pointer overhead for small values.  (Note that bitwise borrowing can be used even for noncopyable values since it is not formally a copy.)
+It might seem that borrowing is strictly better, and in a narrow way that's true: in isolation, it is cheaper to borrow a value out of memory than to copy it. However, borrowing by its nature is *scoped*. This means that there is some duration within the execution of the program during which the borrow is valid. Within this duration, Swift must ensure that no code tries to write to the memory that's been borrowed from. Outside of this duration, Swift must ensure that the borrowed value stops being used. So borrowing can only possibly work if Swift can figure out a scope that it can safely make those two guarantees for.
 
-The `unsafe*Address` and `borrow`/`mutate` can avoid copying because the property value is already in memory within the containing value.  The compiler needs to ensure that the containing value is not destroyed or modified until after the pointer or borrow reference is no longer in use.
+Unfortunately, doing that in arbitrary code is not reliably possible. Swift frequently inserts implicit conservative copies because it cannot figure out that it could have safely borrowed. A hypothetical Non-Copying Swift that refused to do this would often force programmers to either insert those same copies explicitly or find a clever way to restructure their code to make borrowing possible. It is reasonable to argue that that would not a good trade-off for most code, where the cost of copying is likely small and the usability costs would be quite high.
 
-A `read` or `modify` accessor can usually avoid a copy, but not always:  In practice, the implementation cannot delay the bottom half of the coroutine indefinitely.  This can lead to situations where the value is still needed after the coroutine ends, which requires copying the value from the coroutine’s execution frame into the calling context.  When this happens, a `_read` or `_modify` accessor is generally slower than a regular `get`, since it incurs copy overhead similar to a `get` in addition to the coroutine execution overhead.  This also limits the use of `read` or `modify` with property values that are not copyable.
+Furthermore, if a borrow has to be done with a `read` accessor, the coroutine nature of the accessor also has to be considered, because that comes with its own overhead. This is particularly true if the value is going to be copied anyway and so the coroutine ultimately provided no benefit.
+
+None of this is to deny that avoiding copies can often be important for performance or even semantically required. Many of the accessors described in this document are there specifically to enable in-place borrowing and mutation because of the costs of adding extra copies. It just has to be said that borrows are not a panacea and often require substantial differences to coding patterns to be used reliably.
 
 ### Exposing transformed temporary values
 
-The `read` and `modify` accessors provide the ability to expose a transformed version of a stored value. This is important for dictionary mutation, which in the current API exposes the value as an Optional which is `nil` if the value is not currently set.  This allows a dictionary update such as `dict[key]?.modify()` to copy the dictionary value into a constructed optional in the top half of the accessor, then run the method call directly on the value, then run the bottom half to deconstruct the optional and store the result back into the dictionary storage.
+Because coroutine accessors like `read` and `modify` allow non-trivial finalization steps after they complete, they enable some interesting things to be expressed. One of these is that they can expose a transformed version of a stored value.
 
-Another example:  Providing a `Span` over the contents of a String will require that we somehow handle the case where a short String is stored inline.
+For example, `Dictionary`'s default key-based `subscript` exposes the value as an `Optional` so that it can return `nil` if the key is not mapped. `Dictionary` doesn't actually want to store the values as `Optional`s in its internal hashtable because this would require additional storage space for every entry. When the client performs a modification access to this optional value, `Dictionary` can take advantage of the coroutine nature of `modify` by moving the current value (if present) into a temporary `Optional`, allowing the client to mutate that, and then either moving the new value back or, if it's become `nil`, removing the original entry from the hashtable. This avoids any unnecessary copies of the original value, which both avoids some low-level overhead and allows higher-level optimizations like copy-on-write uniqueness checks to continue to succeed.
 
-### Access Scope
+Another example: providing a `Span` over the contents of a `String` can sometimes require temporary allocation to handle the case where a short `String` is stored inline. This therefore requires a coroutine `read`.
 
-The `get`/`set` accessors conceptually represent “instantaneous” access of the value.  After the `get` accessor returns, there is no relation between the returned copy of the property value and the containing value.  Each of the other accessors implies that the containing value must continue to exist for some period.  This period is generally fairly short, but optimization can extend this interval in order to simplify other operations:
+### Access Scopes
+
+Every access has a *scope*. The access begins at one point in the computation history of the program and then ends at another point. Consider this code:
+
+```swift
+arrayOne[i] = arrayTwo[j]
+```
+
+Assuming that these are `Array`s, that all of these names are simple stored variables, and this code sequence is executed optimally, this performs the following formal sequence of abstract operations:
+
+1. A copying read access begins on `i`.
+2. The current value of access 1 is copied.
+3. Access 1 ends.
+4. A copying read access begins on `j`.
+5. The current value of access 4 is copied.
+6. Access 4 ends.
+7. A borrowing read access begins on `arrayTwo`.
+8. A copying read access begins on `Array.subscript` (on access 7, with the index value from 5).
+9. The current value of access 8 is copied.
+10. Access 8 ends.
+11. Access 7 ends.
+12. A modification access begins on `arrayOne`.
+13. An assignment access begins on `Array.subscript` (on access 12, with the index value from 2).
+14. The element value from 9 is assigned into access 13.
+15. Access 13 ends.
+16. Access 12 ends.
+
+Note that accesses to instance members of value types (here, the `Array.subscript`s in steps 8 and 13) always occur within compatible accesses to the containing value.
+
+Swift has an exclusivity rule which governs accesses to real memory locations and prevents them from conflicting. In this example, this applies to the accesses started at steps 1, 4, 7, and 12. The accesses at steps 8 and 13 are to abstract storage declarations implemented with accessors, not to simple stored variables, and so exclusivity does not directly apply, other than the guarantee of exclusivity on `self` that any method on a value type gets.
+
+(The `Array.subscript` accessors internally perform unsafe memory accesses on the array buffer which Swift cannot enforce exclusivity on. However, the exclusivity of `self` is enough for these unsafe accesses to be proven to follow exclusivity, exactly as if the array elements were stored properties of the array. This is another way of saying that array elements use "value semantics" and are still statically memory-safe.)
+
+Copying read accesses (`get`s) and assignment accesses (`set`s) to real memory are considered "instananeous", which means they begin and end without arbitrary code being run in the middle. The only thing that happens within the access scope is the primitive value copy / assignment. Other accesses are non-instantaneous because arbitrary code is run during the access scope, such as the accessor function calls for the `subscript` accesses to the arrays in the example. Swift generally tries to keep access scopes as short as possible to avoid unnecessary exclusivity conflicts.
 
 * `unsafe*Address` accessors return pointers into the containing value.  This is safe for the caller of these accessors because the compiler knows about this relationship and can extend the lifetime of the containing value as needed.  (These accessors are nominally “unsafe” because their implementation requires constructing an unsafe pointer and there are no checks to ensure that the pointer so constructed is in fact valid.  For example, there is no check on the pointee lifetime.))
+
 * `read`/`modify` expose a value for the lifetime of a coroutine. Coroutines enforce that the containing value remains alive for the duration of the coroutine.  Note that in current Swift, the coroutines are generally quite short-lived and the compiler copies the value into or out of the coroutine fairly aggressively.  In the future, the compiler will likely become more adept at expanding the coroutine lifetime to reduce such copying.
+
 * `borrow`/`mutate` return a borrow of the property value.  This borrow has an implied dependence on the containing value, and the compiler must guarantee that the containing value outlives the property access.
 
 ### Ownership of the containing value
 
-All of the above accessors include a reading variant (`get`, `read`, `borrow`) and a writing variant (`set`, `modify`, `mutate`).  By default, the reading variant is not considered to be a mutation of the enclosing value.  The writing variant conversely is considered to be a write access of the enclosing value and the usual Swift exclusivity rules apply to limit the scope of such access.
+When a storage declaration is an instance member of a value type[^1], any access to it is also an access to the containing value. The kind of access performed on the containing value depends on both the kind of access performed on the member and how that access is implemented.
 
-However, a reading accessor can be explicitly marked as `mutating`.  This relaxes checks on the accessor implementation so that it can mutate the containing value, and also causes the caller to treat this as a write access requiring exclusivity enforcement.  This is commonly used for caching or bookkeeping:
+[^1]: Reference types are not accessed when their members are accessed. The reference is provided to the operation, but there is no access scope or exclusivity associated with the referenced object as a whole.
+
+The simplest case is when the member is a simple stored property. Reading from a stored property (whether borrowing or copying) requires a borrowing read of the containing value. Writing to a stored property (whether an assignment or a modification) requires a modification of the containing value.
+
+Most non-stored members of value types are still meant to behave like value members and follow the same rule as stored properties. Reading accessors (`get`, `read`, and `borrow`) are `nonmutating` methods and therefore require a borrowing read access to the containing value. Writing accessors (`set`, `modify`, and `mutate`) are `mutating` methods and therefore require a modification access to the containing value.
+
+However, this can be overridden by explicitly making an reading accessor `mutating`, a writing accessor `nonmutating`, or either kind of accessor `consuming`. This has ownership implications for the containing value when the accessor needs to be used. Some combinations don't make much sense, however.
+
+Making a reading accessor `mutating` allows the accessor implementation to mutate the containing value, but it also requires the caller to treat this as a modification access that needs stronger exclusivity enforcement. This is commonly used for caching or bookkeeping:
 
 ```swift
 struct Foo {
@@ -232,24 +348,23 @@ struct Foo {
 }
 ```
 
-Conversely, writing accessors can be marked as `nonmutating`, though this is not generally useful in practice as it would require that the accessor not in fact mutate the containing value.  This could only be useful for modeling non-property operations as setters.
+Conversely, writing accessors can be marked as `nonmutating`. This prevents the accessor implementation from mutating the containing value, but it allows the caller to use the weaker exclusivity enforcement associated with a reading access. This is mostly useful when the type has some kind of reference-like semantics rather than the typical value semantics of a value type.
 
-Accessors can also be `consuming`.  This indicates that the containing object must end its lifetime once this access is complete.  This is useful for representing certain types of object transformations:
+Accessors can also be `consuming`. Ownership of the containing value will be transfered into the accessor, either by copying it or by ending the lifetime of the value in its original location. This is useful for representing certain types of object transformations:
 
 ```swift
-struct Values {
+struct Values: ~Copyable {
   var dropOldest: Values {
     consuming get {
        let newValues = ... everything but the oldest ...
        return newValues
-       // Current value will end it's lifetime after this returns
     }
   }
 }
 
 let v = Values()
 let v2 = v.dropOldest
-// `v` is no longer alive here
+// `v` is no longer usable here
 ```
 
 Note that `consuming` makes no sense for setters — there is no point to changing a property on a value and then immediately ending the lifetime of that value.  Similarly, `consuming` makes no sense for `borrow` or `unsafeAddress` accessors — those require that the containing value survive for the duration of the returned borrow access or address, so it does not make sense to explicitly terminate the value lifetime immediately.
