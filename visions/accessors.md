@@ -379,11 +379,17 @@ Accessors can often be used to perform other kinds of access than they naturally
 
 This synthesis is important to understand when abstraction is required. For example, suppose a type has a property which is used to satisfy a protocol requirement that expects `read`, `modify`, and `set` accessors. The protocol conformance for the type must synthesize these accessors in terms of the actual implementation of the property. If the synthesis isn't possible, Swift must reject the conformance and report the problem to the programmer.
 
-Every kind of accessor can be synthesized efficiently for a stored variable *except* that `get` requires the value type to be `Copyable`.
-
 When the storage declaration is an instance member of a value type, the ownership requirement of a synthesized accessor must be compatible with all of the accesses that the synthesis requires:
 - If any of the accesses requires consuming `self`, it must be the last access performed to `self`, and the synthesized accessor must itself be `consuming`.
 - If any of the accesses requires mutating `self`, the synthesized accessor must be `consuming` or `mutating`.
+
+#### Stored properties
+
+Every kind of accessor can be synthesized efficiently for copyable stored properties of value types.
+
+If the type of the property is not `Copyable`, `get` cannot be synthesized.
+
+If the property is mutable, and it's either `static` or the containing type is a class, then accesses to it generally require dynamic exclusivity enforcement. This requires a non-trivial finalization step to dynamically record the end of the access, and that means `borrow` and `mutate` cannot be synthesized.
 
 #### `get`
 
