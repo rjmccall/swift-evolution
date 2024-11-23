@@ -249,46 +249,76 @@ For example, `Dictionary`'s default key-based `subscript` exposes the value as a
 
 Another example: providing a `Span` over the contents of a `String` can sometimes require temporary allocation to handle the case where a short `String` is stored inline. This therefore requires a coroutine `read`.
 
-### Access Scopes
+### Access scopes and exclusivity
 
-Every access has a *scope*. The access begins at one point in the computation history of the program and then ends at another point. Consider this code:
+Every access in Swift has an *access scope*: the access begins at one point in the computation history of the program and then ends at a later point. Consider this code:
 
 ```swift
 arrayOne[i] = arrayTwo[j]
 ```
 
-Assuming that these are `Array`s, that all of these names are simple stored variables, and this code sequence is executed optimally, this performs the following formal sequence of abstract operations:
+Assuming these are `Array`s, that all of these names are simple stored variables, and this code sequence is executed optimally, this performs the following formal sequence of abstract operations:
 
 1. A copying read access begins on `i`.
-2. The current value of access 1 is copied.
+2. The current value of access 1 is copied (by directly accessing memory).
 3. Access 1 ends.
 4. A copying read access begins on `j`.
-5. The current value of access 4 is copied.
+5. The current value of access 4 is copied (by directly accessing memory).
 6. Access 4 ends.
 7. A borrowing read access begins on `arrayTwo`.
 8. A copying read access begins on `Array.subscript` (on access 7, with the index value from 5).
-9. The current value of access 8 is copied.
+9. The current value of access 8 is copied (by calling the `get` accessor).
 10. Access 8 ends.
 11. Access 7 ends.
 12. A modification access begins on `arrayOne`.
 13. An assignment access begins on `Array.subscript` (on access 12, with the index value from 2).
-14. The element value from 9 is assigned into access 13.
+14. The element value from 9 is assigned into access 13 (by calling the `set` accessor).
 15. Access 13 ends.
 16. Access 12 ends.
 
 Note that accesses to instance members of value types (here, the `Array.subscript`s in steps 8 and 13) always occur within compatible accesses to the containing value.
 
-Swift has an exclusivity rule which governs accesses to real memory locations and prevents them from conflicting. In this example, this applies to the accesses started at steps 1, 4, 7, and 12. The accesses at steps 8 and 13 are to abstract storage declarations implemented with accessors, not to simple stored variables, and so exclusivity does not directly apply, other than the guarantee of exclusivity on `self` that any method on a value type gets.
+Note also that `Array.subscript` does not directly define `get` and `set` accessors; they are synthesized from the accessors it does define. See the section later about implementing accessors using other accessors.
 
-(The `Array.subscript` accessors internally perform unsafe memory accesses on the array buffer which Swift cannot enforce exclusivity on. However, the exclusivity of `self` is enough for these unsafe accesses to be proven to follow exclusivity, exactly as if the array elements were stored properties of the array. This is another way of saying that array elements use "value semantics" and are still statically memory-safe.)
+Swift has a memory exclusivity rule which governs all accesses to real memory locations. In this example, this applies to the accesses started at steps 1, 4, 7, and 12. The exclusivity rule requires all memory accesses to not conflict, which they do if:
+- they are to the same memory location,
+- neither access is derived from the other,
+- at least one of them is a writing access (a modification or assignment), and
+- the scopes of the accesses overlap (the start of one is not ordered after the end of the other).
+This is mostly enforced with a combination of static and dynamic checks. In some cases, such as unsafe pointers or unsafe concurrency, the programmers must take care to obey the exclusivity rule manually.
 
-Copying read accesses (`get`s) and assignment accesses (`set`s) to real memory are considered "instananeous", which means they begin and end without arbitrary code being run in the middle. The only thing that happens within the access scope is the primitive value copy / assignment. Other accesses are non-instantaneous because arbitrary code is run during the access scope, such as the accessor function calls for the `subscript` accesses to the arrays in the example. Swift generally tries to keep access scopes as short as possible to avoid unnecessary exclusivity conflicts.
+Exclusivity only applies to real memory locations. Storage declarations that are implemented with accessors are not real memory locations, so the accesses at step 8 and 13 are not directly required to obey exclusivity. If a `struct` has a propety with a `nonmutating get` and a `nonmutating set`, it is legal to call them at overlapping times, even though this would violate the "abstract exclusivity" of the computed property. This would only be a problem if the accessors performed conflicting accesses to real memory locations, and they cannot do that to the stored properties of the `struct` itself because they can only read those locations.
 
-* `unsafe*Address` accessors return pointers into the containing value.  This is safe for the caller of these accessors because the compiler knows about this relationship and can extend the lifetime of the containing value as needed.  (These accessors are nominally “unsafe” because their implementation requires constructing an unsafe pointer and there are no checks to ensure that the pointer so constructed is in fact valid.  For example, there is no check on the pointee lifetime.))
+Even though exclusivity isn't directly enforced for storage declarations implemented with accessors, the guarantees offered by exclusivity are often still useful for establishing correctness within accessors. For example, the accessors on `Array.subscript` access memory in the array buffer through unsafe pointers. These accessors are methods, so they receive normal exclusivity guarantees about `self`:
+- The reading accessors are `nonmutating` methods, so they have read access to `self` and a guarantee that no other code can have write access to `self` during the method.
+- The writing accessors are `mutating` methods, so they have write access to `self` and a guarantee that no other code can have any access to `self` during the method.
+`Array` only ever attempts to write to the array buffer within `mutating` methods, so the reading accessors know that there cannot be any writes to the buffer that would conflict with its reads from the buffer. Similarly, the writing accessors know that there cannot be any other accesses to the buffer at all that would conflict with its own reads and writes to the buffer. So even though these buffer accesses are done unsafely, they all still provably obey Swift's memory exclusivity rule.
 
-* `read`/`modify` expose a value for the lifetime of a coroutine. Coroutines enforce that the containing value remains alive for the duration of the coroutine.  Note that in current Swift, the coroutines are generally quite short-lived and the compiler copies the value into or out of the coroutine fairly aggressively.  In the future, the compiler will likely become more adept at expanding the coroutine lifetime to reduce such copying.
+### Access scopes and lifetime dependencies
 
-* `borrow`/`mutate` return a borrow of the property value.  This borrow has an implied dependence on the containing value, and the compiler must guarantee that the containing value outlives the property access.
+Access scopes often must have certain relationships to each other for safety. For example, `Array.subscript` can theoretically allow the element value to be borrowed, but only within the scope of the borrow of the containing array value. The introduction of non-`Escapable` types (beginning in [SE-0446][]) adds a new variation on this because lifetime dependencies can be inherently carried by a value. For example, `Span.subscript` can allow the element value to be borrowed, but only within the original scope that originally gave rise to that `Span` value. That scope is likely to be significantly wider than the scope of a specific access to `Span.subscript`, which is part of the novel power of `Span`.
+
+#### Lifetime dependencies of non-escapable value types
+
+If the value type of a storage declaration is a non-`Escapable` type, the lifetime dependencies of the value are an intrinsic part of the signature of the declaration. They can be related in any way to the access scopes and lifetime dependencies available in the context of the declaration.
+
+For example, it has been proposed that `Array` should have a `span` property. This property would be defined with a `get` accessor that returns a `Span<Element>` that refers to the element storage of the array buffer. This is a new span value, but it carries a lifetime dependency on the access scope of the borrow of the `Array` value that the accessor was called within, because it is only within that scope that the element storage is guaranteed to remain both valid and immutable.
+
+If the array also has non-`Escapable` elements, then the lifetime dependency of the element type of the span must be the same as the lifetime dependency of the element type of the original array.
+
+This property can return the `Span` with a `get`, and use the access scope of the borrow of the `Array`, because the span always refers to the existing memory of the array. A similar property on `String` would not have this option because `String` can store small strings in a compressed form that isn't "in memory". `String.span` would have to produce the `Span` with a `read` accessor to allow local allocation of the span's array, and it would have to return a `Span` with a lifetime dependency of the yield, not the enclosing borrow of the `String`.
+
+In contrast, suppose that a different struct simply stores a `Span<Int>`. This would again be an instance property of the struct, but the lifetime relationship would be very different from either of the two cases above. The containing struct would have to be `~Escapable` and have its own lifetime dependency matching the dependency of the span. A copying read of that stored property (analogous to using the `get` accessor on `Array.span`) must produce a span with that same lifetime dependency, not a dependency narrowed to the access to the struct. Similarly, a write to the property must leave it holding a span of that same lifetime dependency.
+
+Reading these examples, you might be tempted to say that the span can actually have a broader or narrower lifetime dependency in some cases. For example, it would be fine to store a `Span` with a broader lifetime into the stored property in the last example. The right way to understand this in general is as a dependency-subtyping conversion that changes the lifetime dependencies of the value. `Span` specifically is "covariant" in both its memory dependency and its element dependencies. If the underlying memory of a span is safe within scope `X`, and `Y` is a strictly small scope than `X`, then it's okay to narrow the span's memory dependency to `Y`. Similarly, since `Span` only provides read access to its elements, it's okay to apply a dependency-subtyping conversion to the element type, because this is equivalent to doing the same conversion after every read. The first of these is also true of `MutableSpan`, but the second is not because it would allow a value with a narrower dependency to be stored into the span. That is, `MutableSpan` is covariant in its memory dependency but invariant in its element dependency.
+
+#### Scope of usability of the value
+
+When performing a storage declaration, the declaration makes guarantees about the access scope in which the value is safe to use. Like the lifetime dependencies of non-`Escapable` value types, these guarantees are intrinsic to the overall signature of the storage declaration. A storage declaration that makes a certain guarantee cannot evolve to make a weaker guarantee. Unlike the dependencies of the value type, the access scope restrictions are more specific to exactly how the access is performed. `get` and `set` accessors simply return and accept independent values, with no scope restrictions necessary. `read`, `borrow`, `modify`, and `mutate` all inherently provide access to the value only within a specific access scope, which can be narrower than any lifetime dependencies of the value itself.
+
+`borrow` and `mutate` require the access scope to be broader than the access itself because the returned value or reference must be valid to use after the accessor returns. A common choice for instance members of value types would be the access scope of `self`, which matches what value types naturally guarantee for their stored properties. But it can also be some other contextual lifetime dependency. For example, `Span.subscript` can borrow elements with a scope matching the memory dependency of the span, which is much broader than some scope associated with the subscript access, because the elements are immutable within that entire scope.
+
+By design, `read` and `modify` can provide access for a narrower scope than `borrow` and `mutate` can. The most conservative assumption is that the value or reference can only be used during the duration of the coroutine, which is to say, for the scope of the access itself. In principle, a `read` or `modify` accessor could promise that the value or reference is safe to access even after the coroutine completes. However, it's unclear why that would ever be useful, because it means that the finalization phase of the access --- the whole purpose of using a coroutine accessor in the first place --- is no longer reliably ordered after the client is done using the value or reference. For example, a `didSet`-like finalization at the end of a `modify` accessor which sends notifications whenever the value changes would potentially miss changes because the reference can still be modified after the finalization is triggered. The only useful rule appears to be that the access scope of the value/reference is nested within the coroutine.
 
 ### Ownership of the containing value
 
