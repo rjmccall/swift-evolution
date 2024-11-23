@@ -447,45 +447,31 @@ A `modify` accessor can also be synthsized using `mutate` by just yielding the r
 
 A `mutate` accessor can only be synthesized using a stored variable or an accessor with an equivalent lifetime guarantee to `mutate`, like `unsafe*MutableAddress`.
 
-## Some Observations
+## Observations and recommendations
 
 Based on the above considerations, we can make a few useful observations about how these different accessors complement one another:
 
-#### Diversity is needed
+### Diversity is needed
 
-No one pair of accessors suffices to cover the needs of the language:
+No simple set of accessors covers all possible needs in the language.
 
-* `get`/`set` require the property value to be copyable.
-* `unsafeAddress`/`unsafeMutableAddress` and `borrow`/`mutate` require the value to be already available in memory.  In particular, the mutating forms cannot be used to store a new value into a collection such as `Dictionary`, since the storage for such a value would not already be initialized.
-* `read`/`modify` exposes the value only for the lifetime of a coroutine, which is itself limited by implementation restrictions.
+`get` typically requires the value type to be copyable. `set` does not by itself, but it does require copies for modification accesses (which are very common) if it's the only available way to mutate the storage. Even when copying is possible, performing an unnecessary copy imposes significant performance burdens that are sometimes unacceptable.
 
-#### Some combinations are nonsensical
+`borrow` and `mutate` are very efficient for the cases they support, but they cannot generalize over all possible implementations, including cases as simple as mutable class properties. Even in fully concrete situations, there are good uses for finalization, like what `Dictionary.subscript` does in its `modify`.
 
-* Providing both a `mutate` and a `modify` for the same property doesn’t make sense.  If `mutate` is possible, then you can provide the value without making a copy, which means `modify` is unnecessary and redundant.
+`read` and `modify` require the use of coroutines, which add significant performance overhead and limit how clients can use the value (by both restricting the access scope the value is available for and forcing clients to dynamically finalize the access).
 
-#### We need to support existing APIs
+### Some combinations are useless
 
-The current Swift API seems to require the following:
+There is no reason to explicitly define both `borrow` and `read`. If `borrow` is possible to implement, you don't need to also implement `read`.
 
-* `set` is needed to be able to initialize new values for subscript operations.  `modify` is capable of doing this for types that can be trivially initialized, but there can be considerable overhead to construct an empty placeholder, expose it for mutation, and then record the final result.
-* Either `borrow` or `read` is needed to provide safe reading of noncopyable values
-* Either `mutate` or `modify` is needed to provide safe mutation of noncopyable values
-* We have `Dictionary` APIs (among others) that expose values as a different type than they are stored.  These can be supported using `read`/`modify` and storing the transformed value in the coroutine frame for the duration of the access.  They could also be supported using `get` to return a transformed value, but that would require a more expensive read-modify-write cycle for modifications.
-* Because `read`/`modify` have constraints on the lifetime of the access, they cannot fully replace `borrow`/`mutate`.
+There is no reason to explicitly define both `mutate` and `modify`. If `mutate` is possible to implement, you don't need to also implement `modify`.
 
-#### Address accessors are redundant with borrow/mutate
+### Address accessors are redundant with borrow/mutate
 
-The `unsafe*Address` accessors should be unnecessary once we have safe `borrow` and `mutate` to replace them.   But it may take a while to implement the latter, so the former are important interim tools for now.
+The `unsafe*Address` accessors should be unnecessary once we have safe `borrow` and `mutate` to replace them. But it may take a while to implement the latter, and the former are important tools in the interim.
 
-#### Minimal sets of accessors
-
-The above considerations allow us to outline a possible minimal set of accessors:
-
-* The `borrow`, `mutate`, and `set` accessors provide the absolute minimum required for performant property access.
-* In addition, there are a few APIs (especially Dictionary) that expose transformed values; those require `modify` for performant update operations.
-* Providing a freshly-constructed value on each access requires `get`.
-
-#### Roadmap
+### Roadmap
 
 Combining the above, we expect that Swift will converge on a standard set of six accessors — `get`, `set`, `read`, `modify`, `borrow`, and `mutate` — over the next couple of years.
 
@@ -497,19 +483,39 @@ The legacy `_read` and `_modify` accessors will continue to be supported by the 
 
 Based on the above, we can make some concrete recommendations for how each of these accessors should be used.
 
-#### `get`
+### Recommended sets of accessors
 
-This should be used when the access constructs and returns a new value or is part of a resilient interface which might be changed to operate this way at some point in the future.  Note that this works correctly even for non-copyable types when the value truly is returned fresh from each access and not being stored locally.
+The above considerations allow us to suggest several recommended sets of accessors:
+
+- A storage declaration that can't be directly modified and computes a fresh value every time you call it should just provide a `get`.
+
+- A storage declaration that can't be directly modified and always memoizes its value should just provide a `borrow` or (if it is not a property of a value type) a `read`.
+
+- A storage declaration that's trying to model an always-present stored component of a value type should just provide `borrow` and/or `mutate`.
+
+- A storage declaration that's trying to model an always-present stored component of a reference type should just provide `read` and/or `modify`, adding `get` and `set` if performance evaluations suggest it's important.
+
+- A storage declaration that presents a value that transforms what it stores internally should probably provide all of `get`, `set`, `read`, and `modify`.
+
+- An abstracted storage declaration (like a protocol requirement) that's trying to ensure optimal access for a variety of implementations should provide the full gamut of most-general accessors: `get` (if `Copyable`), `set`, `read`, and `modify`.
+
+### `get`
+
+`get` should be used when the access computes a new value or is part of a resilient interface which might be changed to operate this way at some point in the future. Note that this works correctly even for non-copyable types when the value truly is returned fresh from each access and is not being stored locally.
 
 Use `mutating get` when you need to implement a `get` operation that might cache the value or otherwise update mutable state on the containing object.
 
 Use `consuming get` to model transmutation operations, where the original instance is being transformed into some other type, dissolving it in the process. One use case of this is unwrapping box types, where the returned instance is extracted from the box, destroying it in the process.
 
-#### `set`
+### `set`
 
-As above, this is the only reasonable way to implement subscript operations that create new entries.  It can be used with copyable or noncopyable property values.
+`set` is a basic operation for all mutable storage declarations. It should generally be defined unless it is straightforwardly redundant with a `modify` or `mutate` operation.
 
-#### `unsafe*Address`
+If `mutate` is possible to define, `set` will usually be redundant.
+
+If `set` is defined, it should usually be combined with a `modify` or `mutate` unless the definition of `modify` would be exactly the `get`/`yield`/`set` pattern that's automatically synthesized anyway.
+
+### `unsafe*Address`
 
 These are not recommended for general use, as they require working with unsafe pointer types.  However, until `borrow`/`mutate` can be implemented, they will be the only good choice for containers that need to flexibly provide access to non-copyable values.
 
@@ -529,14 +535,17 @@ let x = contents[0]
 
 > Important:  The above example uses unsafe pointer operations in the `subscript` implementation, but the use of pointers is completely invisible to the client source code.
 
-#### `read`
+### `read`
 
-> This is currently implemented as `_read` with slightly different semantics than described here.  In particular `_read` will not always run the “bottom half” if there is a thrown error in the caller during the scope of the coroutine.
+`read` accessors are usually unnecessary when using value semantics. `read` and `borrow` generally only work well when it's possible to borrow some value that's currently in storage. When you combine that with value semantics, `borrow` is usually both possible and preferred.
 
+If the containing value doesn't store a value of the exact type, and so the accessor has to construct it from parts anyway, it's probably best to just return that with a `get`. In principle, you can imagine taking those parts, building them into the new value without copies, and then putting them all back at the end of the access, but this is generally not allowed in a `nonmutating` accessor because the access cannot be assumed to be exclusive.
 
-Read accessors expose direct access to a value, allowing that value to be created on demand for the duration of the access, and destroyed at the end of it. The caller is only given borrow access to the entity — it is not allowed to mutate or consume it.
+`read` accessors are necessary when borrowing out of mutable reference-semantics memory that has to be protected by dynamic exclusivity checks.
 
-The result is scoped to a narrow, unique lifetime tied to the specific access, rather than the instance on which the property was invoked.  Because it is implemented as a scoped coroutine, this lifetime cannot extend past the end of an accessing function:
+`read` accessors can also theoretically be beneficial when something about the decisions above is dynamic: for example, it's possible to borrow the value directly out of memory, but only in some cases, and otherwise some kind of transformation applies. But in this case, it should almost certainly be combined with a `get` if possible so that copying read accesses aren't punished by the coroutine overhead.
+
+The borrowed value yielded by `read` is always scoped to a narrow, unique lifetime tied to the duration of the coroutine, rather than to anything that outlives the current access:
 
 ```swift
 extension Foo {
@@ -566,17 +575,17 @@ func access(foo: Foo) -> NonCopyableType {
 }
 ```
 
-If the example above were implemented as a `get` operation, we could return the constructed non-copyable temporary value  but that would not give the `Foo` object any opportunity to clean up the temporary.
+If the example above were implemented as a `get` operation, we could return the constructed non-copyable temporary value, but that would not give the `Foo` object any opportunity to clean up the temporary.
 
-#### `modify`
+### `borrow`
 
-When a property needs to be exposed for mutation with a fundamentally different type than is being stored, `modify` is the only practical choice.
+When it becomes available, `borrow` will be the most efficient way to provide read access to values that either
+- already exist in memory or
+- will will be stored in memory by the end of the accessor (e.g. because the accessor computes the value and then memoizes it).
 
-#### `borrow`
+It is particularly important to provide `borrow` or `read` access to values that either noncopyable or expensive to copy (for example, because they are large).  This includes values with generic type that might be either noncopyable or expensive to copy. Of these two options, `borrow` should be preferred whenever it is possible to use. Most generic data structures should provide access to their data via `borrow` accessors.
 
-When it becomes available, `borrow` will be the preferred way to provide read access to values that are either noncopyable or expensive to copy (for example, because they are large).  This includes values with generic type that might be either noncopyable or expensive to copy.
-
-Compare how the above example would work with a `borrow` implementation:
+Compare how the example from the `read` section would work with a `borrow` implementation:
 
 ```swift
 extension Foo {
@@ -608,9 +617,31 @@ struct MyContainer<T> {
 
 > Note:  Swift’s implementation of borrowing uses “bitwise borrowing” whenever that would be more efficient than accessing through a pointer.  Formally, “bitwise borrowing” works by invalidating the original value, sharing a copy of that value, then resuscitating the original value when the copy is no longer in use.  Since “invalidating the original value” and “resuscitating the original value” are no-ops at runtime, this can provide the same functionality as “borrow by pointer” while ensuring that borrowing is never less efficient than copying.
 
-#### `mutate`
+### `modify`
 
-A `mutate` accessor can be thought of as a “reverse `inout`”.  In fact, some discussions have advocated using the term “inout” for this accessor.  As with `read`, this requires a new return capability that internally returns a reference to the stored value and tracks the lifetime of that reference against the lifetime of the containing value:
+Unlike `read`, `modify` is broadly useful despite being a coroutine. `modify` and `mutate` allow modification accesses to potentially work on values in-place rather than requiring them to be copied. This is very important for many types, including data structures like `String`, `Array`, and `Dictionary`, as well as any other large or non-copyable type.
+
+There are two principal exceptions where there's no reason to provide either `modify` or `mutate`:
+
+- The value type is truly trivial to copy, such as a simple `Int`, `Double`, or `Bool`.
+
+- The `modify` would just be equivalent to the `get`/`yield`/`set` pattern that Swift can automatically synthesize. This includes cases such as when the old value needs to be copied before the modification in order to compare values after the modification is complete.
+
+The efficient pattern for transformed values that doesn't work with `read` because it's a nonmutating method *does* generally work for `modify`, which is typically `mutating`. `Dictionary` uses exactly this trick internally.
+
+`mutate` is more efficient than `modify` when it's possible to define. However, when writing memory-safe code, `mutate` generally requires the memory being referenced to behave like a value-semantics component of the containing value type:
+
+- the memory can only be accessed during some kind of access to the containing value, and
+
+- it can only be mutated during a mutating access to the containing value.
+
+If these two properties aren't true, then the only way to enforce exclusivity is dynamically, which precludes the use of `mutate` because the end of the access has to be dynamically tracked.
+
+### `mutate`
+
+A `mutate` accessor can be thought of as a “reverse `inout`”. In fact, some discussions have advocated using the term “inout” for this accessor.
+
+As with `read`, this requires a new return capability that internally returns a reference to the stored value and tracks the lifetime of that reference against the lifetime of the containing value:
 
 ```swift
 extension Foo {
@@ -643,3 +674,5 @@ There are a number of open questions that will need to be resolved in the proces
 * The `borrow` and `mutate` accessor implementations will require new return value conventions to be fully useful.
 
 Of course, everything in this document is subject to community review through the Swift Evolution process.
+
+[SE-0446]: https://github.com/swiftlang/swift-evolution/blob/main/proposals/0446-non-escapable.md
