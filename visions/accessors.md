@@ -615,7 +615,7 @@ struct MyContainer<T> {
 }
 ```
 
-> Note:  Swift’s implementation of borrowing uses “bitwise borrowing” whenever that would be more efficient than accessing through a pointer.  Formally, “bitwise borrowing” works by invalidating the original value, sharing a copy of that value, then resuscitating the original value when the copy is no longer in use.  Since “invalidating the original value” and “resuscitating the original value” are no-ops at runtime, this can provide the same functionality as “borrow by pointer” while ensuring that borrowing is never less efficient than copying.
+> Note:  Swift’s implementation of borrowed arguments uses “bitwise borrowing” in many cases, which avoids introducing extra indirection by directly sharing the representation of the value rather than just sharing a pointer. The goal is that ensure that borrowing is never less efficient than copying. We are exploring whether a similar idea can work for `borrow` accessors; abstraction may sometimes make it impossible.
 
 ### `modify`
 
