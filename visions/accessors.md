@@ -447,6 +447,46 @@ A `modify` accessor can also be synthsized using `mutate` by just yielding the r
 
 A `mutate` accessor can only be synthesized using a stored variable or an accessor with an equivalent lifetime guarantee to `mutate`, like `unsafe*MutableAddress`.
 
+### `borrow` and values containing borrows
+
+Some transformational storage naturally wants to embed borrows of the original value into the new value. For example, `Sequence.lazy` returns a sequence that wraps `self` to apply certain operations like `map` and `filter` lazily instead of having them immediately produce a new collection. Today, this `LazySequence` value must store a copy of the original collection:
+
+```swift
+extension Sequence {
+  public var lazy: LazySequence<Self> {
+    return LazySequence(_base: self)
+  }
+}
+
+public struct LazySequence<Base: Sequence> {
+  internal var _base: Base
+}
+```
+
+This makes it both less efficient and incapable of working with non-`Copyable` elements. It would be better if the new sequence instead stored a borrow of the original collection:
+
+```swift
+extension Sequence {
+  public var borrowedLazy: BorrowedLazySequence<Self> {
+    return BorrowedLazySequence(_base: self)
+  }
+}
+
+public struct BorrowedLazySequence<Base: Sequence>: ~Escapable {
+  internal var _base: Borrow<Base>  // Borrow<T> is a possible future direction
+                                    // that allows borrows to be stored in
+                                    // arbitrary places as ~Escapable values
+}
+```
+
+This would avoid any unnecessary copies of the underlying collection, and most patterns that use lazy sequences would still work fine with the `~Escapable` restriction.
+
+It is tempting to think that `borrowedLazy` could be implemented with a `borrow`; after all, isn't a `BorrowedLazySequence` in some sense nothing but a borrow of the original sequence? Certainly the desired basic implementation is exactly the same as a `borrow`: the accessor should return a borrow of the base sequence, trivially "wrapped" as a `BorrowedLazySequence` value, which should have the same underlying representation in memory.
+
+However, this is the wrong way to think about it. A `borrow` accessor always borrows an existing value out of memory, but this accessor is returning a new value. We do need to restrict the use of that new value in the same way that a `borrow` accessor restricts the value it returns, but those restrictions are already taken care of by the fact that the value contains a `Borrow<>`, even when it's returned from a `get` accessor. For example, the scope restrictions on the new value are already expressed by the lifetime dependency of its type, which is `~Escapable` because it contains a `Borrow<>`. Similarly, the new value needs to not copy or take ownership of the base sequence, but this just falls out from the fact that owning a `Borrow<Base>` (as any `struct` owns the values of its stored properties) does not grant ownership of the underlying `Base`.
+
+Therefore, `borrowedLazy` and similar kinds of "transformative" storage that build new values out of existing ones are necessarily implemented with a `get`.
+
 ## Observations and recommendations
 
 Based on the above considerations, we can make a few useful observations about how these different accessors complement one another:
