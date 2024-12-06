@@ -531,13 +531,15 @@ The above considerations allow us to suggest several recommended sets of accesso
 
 - A storage declaration that can't be directly modified and always memoizes its value should just provide a `borrow` or (if it is not a property of a value type) a `read`.
 
-- A storage declaration that's trying to model an always-present stored component of a value type should just provide `borrow` and/or `mutate`.
+- A storage declaration that's trying to model an always-present stored component of a value type should just provide `borrow` and (if mutable) `mutate`.
 
 - A storage declaration that's trying to model an always-present stored component of a reference type should just provide `read` and/or `modify`, adding `get` and `set` if performance evaluations suggest it's important.
 
 - A storage declaration that presents a value that transforms what it stores internally should probably provide all of `get`, `set`, `read`, and `modify`.
 
-- An abstracted storage declaration (like a protocol requirement) that's trying to ensure optimal access for a variety of implementations should provide the full gamut of most-general accessors: `get` (if `Copyable`), `set`, `read`, and `modify`.
+- An abstract storage declaration (like a protocol requirement) that's trying to ensure the most efficient access possible and is willing to only allow implementations that represent an always-present stored component of a value type should just provide `borrow` and `mutate`.
+
+- An abstract storage declaration (like a protocol requirement) that's trying to ensure the most efficient access possible without constraining its implementations should provide the full gamut of most-general accessors: `get` (if `Copyable`), `set`, `read`, and `modify`. Providing `read` and `modify` instead of `borrow` and `mutate` will restrict the scope in which the value can be used, but this is necessary when giving implementations enough additional flexibility that they might require dynamic finalization of the access.
 
 ### `get`
 
