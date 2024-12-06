@@ -310,9 +310,9 @@ If the array also has non-`Escapable` elements, then the lifetime dependency of 
 
 This property can return the `Span` with a `get`, and use the access scope of the borrow of the `Array`, because the span always refers to the existing memory of the array. A similar property on `String` would not have this option because `String` can store small strings in a compressed form that isn't "in memory". `String.span` would have to produce the `Span` with a `read` accessor to allow local allocation of the span's array, and it would have to return a `Span` with a lifetime dependency of the yield, not the enclosing borrow of the `String`.
 
-In contrast, suppose that a different struct simply stores a `Span<Int>`. This would again be an instance property of the struct, but the lifetime relationship would be very different from either of the two cases above. The containing struct would have to be `~Escapable` and have its own lifetime dependency matching the dependency of the span. A copying read of that stored property (analogous to using the `get` accessor on `Array.span`) must produce a span with that same lifetime dependency, not a dependency narrowed to the access to the struct. Similarly, a write to the property must leave it holding a span of that same lifetime dependency.
+In contrast, suppose that a different struct simply stores a `Span<Int>`. This would again be an instance property of the struct, but the lifetime relationship would be very different from either of the two cases above. The containing struct would have to be `~Escapable` and have its own lifetime dependency matching the dependency of the span. A copying read of that stored property (analogous to using the `get` accessor on `Array.span`) must produce a span with that same lifetime dependency, not a dependency narrowed to the access to the struct. Similarly, a write to the property must leave it holding a span with the same lifetime dependencies, or else subsequent uses of the span (or its elements) might be corrupted.
 
-Reading these examples, you might be tempted to say that the span can actually have a broader or narrower lifetime dependency in some cases. For example, it would be fine to store a `Span` with a broader lifetime into the stored property in the last example. The right way to understand this in general is as a dependency-subtyping conversion that changes the lifetime dependencies of the value. `Span` specifically is "covariant" in both its memory dependency and its element dependencies. If the underlying memory of a span is safe within scope `X`, and `Y` is a strictly small scope than `X`, then it's okay to narrow the span's memory dependency to `Y`. Similarly, since `Span` only provides read access to its elements, it's okay to apply a dependency-subtyping conversion to the element type, because this is equivalent to doing the same conversion after every read. The first of these is also true of `MutableSpan`, but the second is not because it would allow a value with a narrower dependency to be stored into the span. That is, `MutableSpan` is covariant in its memory dependency but invariant in its element dependency.
+Reading these examples, you might be tempted to say that the span can actually have a broader or narrower lifetime dependency in some cases. For example, it would be fine to store a `Span` with a broader lifetime into the stored property in the last example. One way to understand this in general is as a dependency-subtyping conversion that changes the lifetime dependencies of the value. `Span` specifically is "covariant" in both its memory dependency and its element dependencies. If the underlying memory of a span is safe within scope `X`, and `Y` is a strictly small scope than `X`, then it's okay to narrow the span's memory dependency to `Y`. Similarly, since `Span` only provides read access to its elements, it's okay to apply a dependency-subtyping conversion to the element type, because this is equivalent to doing the same conversion after every read. The first of these is also true of `MutableSpan`, but the second is not because it would allow a value with a narrower dependency to be stored into the span. That is, `MutableSpan` is covariant in its memory dependency but invariant in its element dependency.
 
 #### Scope of usability of the value
 
@@ -427,7 +427,7 @@ This synthesis usually doesn't work for non-`Copyable` value types because stora
 
 `read` can also be synhesized using `borrow`: the coroutine calls `borrow`, yields the result, and does nothing in the finalization stage.
 
-A `borrow` accessor can only be synthesized using a stored variable or an accessor with an equivalent lifetime guarantee to `borrow`, like `unsafe*Address`.
+A `borrow` accessor can only be synthesized using a stored variable or an accessor with an equivalent lifetime guarantee to `borrow`, like `unsafe*Address`. Moreover, it can only be synthesized using a stored variable if exclusivity for the variable can be statically guaranteed, such as if the variable is immutable or is a stored property of a value type. Other stored variables require dynamic exclusivity checks for safety, which adds dynamic finalization to the access.
 
 #### `modify` and `mutate`
 
@@ -443,11 +443,11 @@ This synthesized modification access requires a coroutine model because the call
 
 Note that the `get` can itself be synthetic in this synthesis. For example, if the original storage declaration provides a `borrow` and a `set`, the `get` can be synthesized in terms of the `borrow`, and then the `modify` can be synthesized in terms of the `set` and the synthesized `get`. Any requirements for synthesizing the `get` also apply to synthesizing the `modify`; in particular, the value type must be `Copyable`.
 
-Because this synthesis requires a `get`, it generally doesn'y work for non-`Copyable` value types. (It could work if the storage declaration provides a `get`, but such an accessor usually can't be defined unless it's `consuming`, which would prevent the `set` from being called later.) To support modification, a storage declaration of non-`Copyable` type must generally also define either `modify` or `mutate`.
+Because this synthesis requires a `get`, it generally doesn't work for non-`Copyable` value types. (It could work if the storage declaration provides a `get`, but such an accessor usually can't be defined unless it's `consuming`, which would prevent the `set` from being called later.) To support modification, a storage declaration of non-`Copyable` type must generally also define either `modify` or `mutate`.
 
 A `modify` accessor can also be synthsized using `mutate` by just yielding the reference returned by the `mutate` accessor and then doing nothing in the finalization stage.
 
-A `mutate` accessor can only be synthesized using a stored variable or an accessor with an equivalent lifetime guarantee to `mutate`, like `unsafe*MutableAddress`.
+A `mutate` accessor can only be synthesized using a stored variable or an accessor with an equivalent lifetime guarantee to `mutate`, like `unsafe*MutableAddress`.  Moreover, it can only be synthesized using a stored variable if exclusivity for the variable can be statically guaranteed, such as if the variable is a stored property of a value type. Other stored variables require dynamic exclusivity checks for safety, which adds dynamic finalization to the access.
 
 ### Values that represent accesses
 
@@ -571,13 +571,13 @@ The above considerations allow us to suggest several recommended sets of accesso
 
 - A storage declaration that can't be directly modified and computes a fresh value every time you call it should just provide a `get`.
 
-- A storage declaration that can't be directly modified and always memoizes its value should just provide a `borrow` or (if it is not a property of a value type) a `read`.
+- A storage declaration that computes a fresh value on the first access but memoizes it in thereafter-immutable memory should just provide a `borrow`.
 
 - A storage declaration that's trying to model an always-present stored component of a value type should just provide `borrow` and (if mutable) `mutate`.
 
-- A storage declaration that's trying to model an always-present stored component of a reference type should just provide `read` and/or `modify`, adding `get` and `set` if performance evaluations suggest it's important.
+- A storage declaration that's trying to model an always-present stored component of a reference type should just provide `read` and/or `modify`, adding `get` and `set` if performance evaluations suggest it's important. See the section on synthesizing `borrow` and `mutate` for why reference types require coroutine accessors.
 
-- A storage declaration that presents a value that transforms what it stores internally should probably provide all of `get`, `set`, `read`, and `modify`.
+- A storage declaration that presents a transformation or wrapping of a value it stores internally should provide at least `get` and `set`. It should consider providing `read` and/or `modify` if it can implement them more efficiently than they would be synthesized from the `get` and `set`.
 
 - An abstract storage declaration (like a protocol requirement) that's trying to ensure the most efficient access possible and is willing to only allow implementations that represent an always-present stored component of a value type should just provide `borrow` and `mutate`.
 
