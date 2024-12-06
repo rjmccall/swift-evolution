@@ -11,7 +11,7 @@ struct Foo {
 }
 ```
 
-In this case, the `get` accessor behaves just like a normal method that returns a value of the property's type, while the `set` accessor behaves just a normal method that receives a value of the property's type as an argument.
+In this case, the `get` accessor behaves just like a `nonmutating` method that returns a value of the property's type, while the `set` accessor behaves just a `mutating` method that receives a value of the property's type as an argument.
 
 The `get` and `set` accessors are ideal for implementing operations that copy the current value of the property:
 
@@ -117,7 +117,7 @@ The semantic and implementation-level differences between borrowing and copying/
 
 It is reasonable to ask whether Swift could categorize *all* read accesses into these two kinds based on context, the same way that it distinguishes reads from assignments. This would be straightforward at a technical level, but it is controversial as a design direction because the most obvious definitions would be very aggressive about borrowing values. This could cause surprising semantic problems for Swift programmers, especially those working extensively with classes, and it could break the behavior of existing code. This remains an open question that this vision does not take a stand on.
 
-## Two Dimensions of Accessors
+## Phases of access
 
 To summarize the previous section, there are four basic kinds of access:
 
@@ -156,7 +156,7 @@ So we have four kinds of access, and we can classify accessor implementations by
 |**Routine**   |             |               |            |           |
 |**Coroutine** |✗            |               |            |✗          |
 
-A copying read access has to generate an independent value during the first phase. Given that, it's unclear what a copying read accessor could possibly need to do during finalization. If there's some sort of cleanup it has to do, and after the cleanup the value shouldn't be used, then the value wasn't really independent in the first place.
+A copying read access has to generate an independent value during the first phase. Given that, it seems illogical for it to need to do any work during finalization: if the value is only usable within the scope of a coroutine call, it is not truly an independent value. This document will by-and-large accept this logic. However, there is a counterargument that applies to non-`Escapable` value types; see the section below on "Values that represent accesses".
 
 An assignment access just consumes an independent value. Just like above, it's unclear what an assignment accessor could possibly need to do that would require it to be split into multiple phases.
 
@@ -175,7 +175,9 @@ Some of the above exist in the current Swift language, others we expect to be pr
 
 The `get` accessor is the natural most-general model of a copying read access. It is an ordinary function that returns an independent value that is conceptually a copy of the current value of the storage.
 
-In principle, since a function can return a non-`Copyable` type, there's no reason a storage declaration with a non-`Copyable` value type couldn't provide a `get` accessor. In practice, however, this is generally either impossible or at least undesirably expensive. Non-`Copyable` types are typically non-`Copyable` because they represent some kind of unique ownership that cannot be duplicated without changing the meaning. These storage declarations generally cannot support a copying read access under any implementation.
+A `get` accessor can be used with a non-`Copyable` value type; the accessor simply has to return an independent value every time. This is usually impossible to implement when the storage declaration is just providing access to a non-copyable value stored in memory. That makes sense: if there is a `T` stored in memory, and `T` is not copyable, it should not be possible to access it with a copying read. For example, if `T` is `~Copyable`, then the `subscript` on `Array<T>` cannot be implemented with a `get` because it would have to copy the element, which it cannot do.
+
+However, a closely-related pattern *is* possible with non-`Copyable` types. If the value type of the storage declaration is not the in-memory type `T`, but instead reflects an ongoing *access* to some underlying `T`, then programmer's use of the storage declaration actually represents a request to begin the underlying access. (In memory-safe code, this requires the value type to be `~Escapable`.) For example, a value of type `Span<T>` represents an ongoing read access to an array of `T` values. `Array<T>` can offer a `span` property that returns a `Span<T>`; by scope-restricting the span to the current borrow of `self`, the array can safely offer access to its elements. This works even for non-`Copyable` element types. This property would have to be implemented with a `get` accessor, because the `Span` value it returns is a new value and does not preexist in memory. See the section "Values that represent accesses" later in this document.
 
 ### `set`
 
@@ -447,9 +449,17 @@ A `modify` accessor can also be synthsized using `mutate` by just yielding the r
 
 A `mutate` accessor can only be synthesized using a stored variable or an accessor with an equivalent lifetime guarantee to `mutate`, like `unsafe*MutableAddress`.
 
-### `borrow` and values containing borrows
+### Values that represent accesses
 
-Some transformational storage naturally wants to embed borrows of the original value into the new value. For example, `Sequence.lazy` returns a sequence that wraps `self` to apply certain operations like `map` and `filter` lazily instead of having them immediately produce a new collection. Today, this `LazySequence` value must store a copy of the original collection:
+It is often useful to build up values from other values. A simple example is that wrapping a value in `Optional` technically makes a new value that stores the old value inside it. A more complex example might be a struct that combines a `TouristSite` with its interest score and its distance from your hotel, for use in planning a trip to a city. In any case, the easiest way to do this is generally to copy the value into the new compound value. But if you're working with non-`Copyable` types, or if you simply need to avoid copying for performance reasons, that may not be acceptable or even allowed.
+
+The alternative is to store a type that represents an ongoing access to the value. Such a type is necessarily only safe to use within the scope of the access, which means it has to be non-`Escapable`. A type that represents an ongoing read access can still be `Copyable` because it's okay to have simultaneous read accesses to the same memory. A type that represents an ongoing modification access needs to also be `~Copyable` to preven simultaneous modifications. A value that stores one of these types generally inherits these restrictions.
+
+For example, the `Span` type introduced by [SE-0447][] represents an ongoing read access to a contiguous array of elements. As expected, it is `~Escapable` but still `Copyable`. `MutableSpan`, which is a future direction of that proposal, would be both `~Escapable` and `~Copyable`. `Array<T>` may someday offer a `span` property that returns a `Span<T>`; reading this property would begin a read access to the array that would end when the caller was done with the span.
+
+We are also considering types that more narrowly represent ongoing accesses to individual values. For example, `Borrow<T>` (`~Escapable`, `Copyable`) might represent an ongoing read access to a single value, while `Inout<T>` (`~Escapable`, `~Copyable`) might represent an ongoing modification access. Either could be produced directly from any storage reference expression of the right type (a mutable one, for `Inout`).
+
+To see how these could be used, let's consider Swift's existing library facilities for lazy collections. `Sequence.lazy` returns a sequence that wraps `self` to apply certain operations like `map` and `filter` lazily instead of having them immediately produce a new collection. Today, this `LazySequence` value must store a copy of the original collection:
 
 ```swift
 extension Sequence {
@@ -463,29 +473,61 @@ public struct LazySequence<Base: Sequence> {
 }
 ```
 
-This makes it both less efficient and incapable of working with non-`Copyable` elements. It would be better if the new sequence instead stored a borrow of the original collection:
+This makes it both less efficient and incapable of working with non-`Copyable` collections. It is only fairly marginally inefficient for copy-on-write collections like `Array`, because copying an `Array` just performs an extra reference-counting operation, but it would be a serious performance problem for a collection like [SE-0453][]'s `Vector` that would need to copy every element in the collection.
+
+It would be better if the new sequence instead stored a borrow of the original collection:
 
 ```swift
 extension Sequence {
+  // The returned sequence is implicitly restricted to the scope of the
+  // borrow of the value passed as `self`.
   public var borrowedLazy: BorrowedLazySequence<Self> {
     return BorrowedLazySequence(_base: self)
   }
 }
 
 public struct BorrowedLazySequence<Base: Sequence>: ~Escapable {
-  internal var _base: Borrow<Base>  // Borrow<T> is a possible future direction
-                                    // that allows borrows to be stored in
-                                    // arbitrary places as ~Escapable values
+  internal var _base: Borrow<Base>
 }
 ```
 
-This would avoid any unnecessary copies of the underlying collection, and most patterns that use lazy sequences would still work fine with the `~Escapable` restriction.
+This would guarantee that the original collection would never get copied. The `BorrowedLazySequence` would only be usable within the scope of a borrow of the original collection. That's fine for typical uses of lazy sequences: programmers usually just perform a few lazy operations in a row, then immediately use the result.
 
-It is tempting to think that `borrowedLazy` could be implemented with a `borrow`; after all, isn't a `BorrowedLazySequence` in some sense nothing but a borrow of the original sequence? Certainly the desired basic implementation is exactly the same as a `borrow`: the accessor should return a borrow of the base sequence, trivially "wrapped" as a `BorrowedLazySequence` value, which should have the same underlying representation in memory.
+Notice that `borrowedLazy` is implemented with a `get` here. In this document, we've described three reading accessors: `get`, `borrow`, and `read`. Why does this use `get`?
 
-However, this is the wrong way to think about it. A `borrow` accessor always borrows an existing value out of memory, but this accessor is returning a new value. We do need to restrict the use of that new value in the same way that a `borrow` accessor restricts the value it returns, but those restrictions are already taken care of by the fact that the value contains a `Borrow<>`, even when it's returned from a `get` accessor. For example, the scope restrictions on the new value are already expressed by the lifetime dependency of its type, which is `~Escapable` because it contains a `Borrow<>`. Similarly, the new value needs to not copy or take ownership of the base sequence, but this just falls out from the fact that owning a `Borrow<Base>` (as any `struct` owns the values of its stored properties) does not grant ownership of the underlying `Base`.
+Because we're working with borrows, it's natural to expect that maybe this should use `borrow`. After all, isn't a `BorrowedLazySequence` in some sense nothing but a borrow of the original sequence? But `borrow` is not a catch-all for all borrow-ish operations; it's used specifically when the return value is being read from an existing place in memory. There is no existing `BorrowedLazySequence` value in memory; this accessor needs to return a new value, albeit a scope-restricted one. Therefore, this cannot be implemented with `borrow`.
 
-Therefore, `borrowedLazy` and similar kinds of "transformative" storage that build new values out of existing ones are necessarily implemented with a `get`.
+Both `get` and `read` could work here. The difference is just the usual difference between `get` and `read`:
+- `read` allows dynamic finalization to be performed after the access;
+- `read` yields a borrowed value, not an owned one; and
+- `read` yields a value that is scope-restricted within the yield, not within the wider scope of the borrow of `self`.
+
+Since no dynamic finalization is required, and the value is safe to use within the wider scope of the borrow of `self`, there's no reason to not implement this with `get`.
+
+If dynamic finalization *is* required, `read` is potentially a problematic choice because it always returns a borrowed value, which restricts what the caller can do with the value.
+
+Consider a `WeirdArray<T>` type with a `span` property that might need to allocate temporary memory. (We are not considering whether it is actually a good idea for such a type to offer a `span` property, just how Swift would work if it did.) This allocation requires finalization, so `get` is impossible; either the property must be implemented with `read`, or it must be redesigned as a method that passes the `Span` to a callback.
+
+Many uses of `Span` actually need ownership of the span. For example:
+
+```swift
+extension WeirdArray {
+  var isPalindrome: Bool {
+    var s = self.span
+    while s.count > 1 {
+      if s.first != s.last { return false }
+      s = s.extracting(droppingFirst: 1).extracting(droppingLast: 1)
+    }
+    return true
+  }
+}
+```
+
+`self.span` yields a borrowed value, so the assignment to `s` actually requires the yielded span to be copied. This is fine because `Span` is a `Copyable` type, so this code should work.
+
+However, a superficially similar mutating algorithm using `MutableSpan` would not compile. First, `MutableSpan` is not a `Copyable` type. But even more importantly, all of the mutation operations on `MutableSpan` require exclusive access to the span, which the algorithm fundamentally never receives because it gets a borrowed span.
+
+To allow this, Swift would need a copying read accessor that was implemented with a coroutine. This is the counterexample to the logic laid out above in the section on the six fundamental accessors, and it makes perfect sense: the accessor is yielding an independent value that can only be used within the scope of the yield, a restriction that can be safely enforced because of the non-`Escapable` nature of the type.
 
 ## Observations and recommendations
 
@@ -718,3 +760,5 @@ There are a number of open questions that will need to be resolved in the proces
 Of course, everything in this document is subject to community review through the Swift Evolution process.
 
 [SE-0446]: https://github.com/swiftlang/swift-evolution/blob/main/proposals/0446-non-escapable.md
+[SE-0447]: https://github.com/swiftlang/swift-evolution/blob/main/proposals/0447-span-access-shared-contiguous-storage.md
+[SE-0453]: https://github.com/swiftlang/swift-evolution/blob/main/proposals/0453-vector.md
