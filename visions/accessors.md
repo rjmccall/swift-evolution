@@ -262,23 +262,23 @@ arrayOne[i] = arrayTwo[j]
 Assuming these are `Array`s, that all of these names are simple stored variables, and this code sequence is executed optimally, this performs the following formal sequence of abstract operations:
 
 1. A copying read access begins on `i`.
-2. The current value of access 1 is copied (by directly accessing memory).
-3. Access 1 ends.
+2. The current value of `i` is copied (using access 1, by directly accessing memory).
+3. Access 1 ends on `i`.
 4. A copying read access begins on `j`.
-5. The current value of access 4 is copied (by directly accessing memory).
-6. Access 4 ends.
+5. The current value of `j` is copied (using access 4, by directly accessing memory).
+6. Access 4 ends on `j`.
 7. A borrowing read access begins on `arrayTwo`.
-8. A copying read access begins on `Array.subscript` (on access 7, with the index value from 5).
-9. The current value of access 8 is copied (by calling the `get` accessor).
-10. Access 8 ends.
-11. Access 7 ends.
+8. A copying read access begins on `arrayTwo.subscript` (using access 7, with the index value read from `j` at step 5).
+9. The current value of `arrayTwo.subscript` copied (using access 8, by calling the `get` accessor).
+10. Access 8 ends on `arrayTwo.subscript`.
+11. Access 7 ends on `arrayTwo`.
 12. A modification access begins on `arrayOne`.
-13. An assignment access begins on `Array.subscript` (on access 12, with the index value from 2).
-14. The element value from 9 is assigned into access 13 (by calling the `set` accessor).
-15. Access 13 ends.
-16. Access 12 ends.
+13. An assignment access begins on `arrayOne.subscript` (using access 12, with the index value read from `i` at step 2).
+14. The element value read at `arrayTwo.subscript` at step 9 is assigned into `arrayOne.subscript` (using access 13, by calling the `set` accessor).
+15. Access 13 ends on `arrayOne.subscript`.
+16. Access 12 ends on `arrayOne`.
 
-Note that accesses to instance members of value types (here, the `Array.subscript`s in steps 8 and 13) always occur within compatible accesses to the containing value.
+Note that accesses to instance members of value types (here, the `subscript`s in steps 8 and 13) always occur within compatible accesses to the containing value.
 
 Note also that `Array.subscript` does not directly define `get` and `set` accessors; they are synthesized from the accessors it does define. See the section later about implementing accessors using other accessors.
 
@@ -495,23 +495,23 @@ This would guarantee that the original collection would never get copied. The `B
 
 Notice that `borrowedLazy` is implemented with a `get` here. In this document, we've described three reading accessors: `get`, `borrow`, and `read`. Why does this use `get`?
 
-Because we're working with borrows, it's natural to expect that maybe this should use `borrow`. After all, isn't a `BorrowedLazySequence` in some sense nothing but a borrow of the original sequence? But `borrow` is not a catch-all for all borrow-ish operations; it's used specifically when the return value is being read from an existing place in memory. There is no existing `BorrowedLazySequence` value in memory; this accessor needs to return a new value, albeit a scope-restricted one. Therefore, this cannot be implemented with `borrow`.
+Because we're working with borrows, it's natural to expect that maybe this should use `borrow`. After all, isn't a `BorrowedLazySequence` in some sense nothing but a borrow of the original sequence? But `borrow` is not a catch-all for all operations that involve borrowing; it's used specifically when the return value is being borrowed from an existing memory location. There is no existing `BorrowedLazySequence` value in memory; this accessor needs to return a new value, albeit a scope-restricted one. Therefore, this cannot be implemented with `borrow`.
 
 Both `get` and `read` could work here. The difference is just the usual difference between `get` and `read`:
 - `read` allows dynamic finalization to be performed after the access;
 - `read` yields a borrowed value, not an owned one; and
 - `read` yields a value that is scope-restricted within the yield, not within the wider scope of the borrow of `self`.
 
-Since no dynamic finalization is required, and the value is safe to use within the wider scope of the borrow of `self`, there's no reason to not implement this with `get`.
+Since no dynamic finalization is required, and the value is safe to use within the wider scope of the borrow of `self`, this can be implemented with a `get`.
 
 If dynamic finalization *is* required, `read` is potentially a problematic choice because it always returns a borrowed value, which restricts what the caller can do with the value.
 
-Consider a `WeirdArray<T>` type with a `span` property that might need to allocate temporary memory. (We are not considering whether it is actually a good idea for such a type to offer a `span` property, just how Swift would work if it did.) This allocation requires finalization, so `get` is impossible; either the property must be implemented with `read`, or it must be redesigned as a method that passes the `Span` to a callback.
+Consider a `DiscontiguousArray<T>` type with a `span` property that might need to allocate temporary memory. (We are not considering whether it is actually a good idea for such a type to offer a `span` property, just how Swift would work if it did.) This allocation requires finalization, so `get` is impossible; either the property must be implemented with `read`, or it must be redesigned as a method that passes the `Span` to a callback.
 
 Many uses of `Span` actually need ownership of the span. For example:
 
 ```swift
-extension WeirdArray {
+extension DiscontiguousArray {
   var isPalindrome: Bool {
     var s = self.span
     while s.count > 1 {
@@ -523,9 +523,11 @@ extension WeirdArray {
 }
 ```
 
-`self.span` yields a borrowed value, so the assignment to `s` actually requires the yielded span to be copied. This is fine because `Span` is a `Copyable` type, so this code should work.
+Note the scope of the access to `self` here. The value yielded by `self.span`'s `read` accessor is `~Escapable` and scope-restricted to the yield, so the coroutine cannot be resumed until all uses of `s` are done. One way this could work is to tie it to the scope of `s`, so that the coroutine would be finished as part of leaving that scope (which in this case is always done by returning from the function). The exact language rule here will be designed and reviewed as part of the lifetime dependency feature.
 
-However, a superficially similar mutating algorithm using `MutableSpan` would not compile. First, `MutableSpan` is not a `Copyable` type. But even more importantly, all of the mutation operations on `MutableSpan` require exclusive access to the span, which the algorithm fundamentally never receives because it gets a borrowed span.
+`self.span` yields a borrowed value, but assignment to a mutable variable generally requires an owned value, so the yielded span has to be copied as part of the assignment. This is fine because `Span` is a `Copyable` type.
+
+However, a superficially similar mutating algorithm using `MutableSpan` would not compile. First, `MutableSpan` is not a `Copyable` type. But even more importantly, all of the mutation operations on `MutableSpan` require exclusive access to the span, which the algorithm fundamentally never receives because it gets a borrowed span from the `read` accessor.
 
 To allow this, Swift would need a copying read accessor that was implemented with a coroutine. This is the counterexample to the logic laid out above in the section on the six fundamental accessors, and it makes perfect sense: the accessor is yielding an independent value that can only be used within the scope of the yield, a restriction that can be safely enforced because of the non-`Escapable` nature of the type.
 
