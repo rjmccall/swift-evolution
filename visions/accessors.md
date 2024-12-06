@@ -167,7 +167,7 @@ Based on the discussion above, we are left with six combinations that are both p
 |              |Copying read |Borrowing read |Modification|Assignment |
 |---           |---          |---            |---         |---        |
 |**Routine**   |get          |borrow         |mutate      |set        |
-|**Coroutine** |✗            |read           |modify      |✗          |
+|**Coroutine** |✗            |yield          |yield inout |✗          |
 
 Some of the above exist in the current Swift language, others we expect to be proposed in the near future.
 
@@ -185,29 +185,29 @@ The `set` accessor is the natural most-general model of an assignment access. It
 
 A storage declaration can usefully define both a `set` accessor and a modification accessor. Assignment accesses will just call `set`, allowing them to bypass any overhead that might be associated with reading the current value. Modification accesses will ignore the `set` and just use the modification accessor. However, if there isn't any overhead for reading the current value --- for example, if the value is already stored in memory somewhere --- then this is unlikely to be a useful optimization over just defining a non-coroutine modification accessor.
 
-### `read` and `borrow`
+### `yield` and `borrow`
 
-The `read` accessor is the natural most-general model of a borrowing read access. It is a coroutine function which yields a borrowed value and can then do arbitrary finalization when resumed.
+The `yield` accessor is the natural most-general model of a borrowing read access. It is a coroutine function which yields a borrowed value and can then do arbitrary finalization when resumed.
 
 The `borrow` accessor is a specialization of that model which expresses that no finalization is required. It is an ordinary function that returns a borrowed value. Swift should be able to return borrowed value without adding pointer indirection for simple types. The compiler must prove that the borrow is valid within some some that encloses the call to the accessor.
 
 Both of these accessors naturally work for non-`Copyable` value types.
 
-Swift has long had experimental support for `read` accessors using the unofficial spelling `_read`. There is currently a proposal being pitched to add these accessors officially to the language with the name `read`; there are some other small differences, but mostly the behavior is the same. We are also exploring a more efficient implementation approach for `read` than that used by `_read`.
+Swift has long had experimental support for `yield` accessors using the unofficial spelling `_read`. There is currently [a proposal being pitched](https://forums.swift.org/t/pitch-modify-and-read-accessors/75627) to add these accessors officially to the language; the current draft uses the name `read`, but `yield` has been floated in the discussion. This document uses `yield` because it avoids conflating read accesses in general with the name of a specific accessor, and it makes it very clear which borrowing read accessor is a coroutine. The pitched feature differs in some small ways from `_read`, but the overall concept is the same. The proposal authors are also exploring a more efficient implementation approach for `yield` than that used by `_read`.
 
 `borrow` accessors are not currently implemented, but we expect to propose them for Swift Evolution at some point in the future.
 
-### `modify` and `mutate`
+### `yield inout` and `mutate`
 
-`modify` and `mutate` are both modification accessors.
+`yield inout` and `mutate` are both modification accessors.
 
-The `modify` accessor is the natural most-general model of a modification access. It is a coroutine function which yields a reference to mutable memory and can then do arbitrary finalization when resumed.
+The `yield inout` accessor is the natural most-general model of a modification access. It is a coroutine function which yields a reference to mutable memory and can then do arbitrary finalization when resumed.
 
 The `mutate` accessor is a specialization of that model which expresses that no finalization is required. It is an ordinary function that returns a reference to mutable memory. The compiler must prove that the access to that memory is exclusive within some scope that encloses the call to the accessor.
 
 Both of these accessors naturally work for non-`Copyable` value types.
 
-Swift has long had experimental support for `modify` accessors using the unofficial spelling `_modify`. There is currently a proposal being pitched to add these accessors officially to the language with the name `modify`; there are some other small differences, but mostly the behavior is the same. We are also exploring a more efficient implementation approach for `modify` coroutines than that used by `_modify`.
+Swift has long had experimental support for `yield inout` accessors using the unofficial spelling `_modify`. There is currently [a proposal being pitched](https://forums.swift.org/t/pitch-modify-and-read-accessors/75627) to add these accessors officially to the language; the current draft uses the name `modify`, but `yield inout` has been floated in the discussion. As with `yield`, above, this document uses `yield inout` to sidestep some confusion. The pitched feature differs in some small ways from `_modify`, but the overall concept is the same. The proposal authors are also exploring a more efficient implementation approach for `yield inout` than that used by `_modify`.
 
 `mutate` accessors are not currently implemented, but we expect to propose them for Swift Evolution at some point in the future.
 
@@ -239,17 +239,17 @@ It might seem that borrowing is strictly better, and in a narrow way that's true
 
 Unfortunately, doing that in arbitrary code is not reliably possible. Swift frequently inserts implicit conservative copies because it cannot figure out that it could have safely borrowed. A hypothetical Non-Copying Swift that refused to do this would often force programmers to either insert those same copies explicitly or find a clever way to restructure their code to make borrowing possible. It is reasonable to argue that that would not a good trade-off for most code, where the cost of copying is likely small and the usability costs would be quite high.
 
-Furthermore, if a borrow has to be done with a `read` accessor, the coroutine nature of the accessor also has to be considered, because that comes with its own overhead. This is particularly true if the value is going to be copied anyway and so the coroutine ultimately provided no benefit.
+Furthermore, if a borrow has to be done with a `yield` accessor, the coroutine nature of the accessor also has to be considered, because that comes with its own overhead. This is particularly true if the value is going to be copied anyway and so the coroutine ultimately provided no benefit.
 
 None of this is to deny that avoiding copies can often be important for performance or even semantically required. Many of the accessors described in this document are there specifically to enable in-place borrowing and mutation because of the costs of adding extra copies. It just has to be said that borrows are not a panacea and often require substantial differences to coding patterns to be used reliably.
 
 ### Exposing transformed temporary values
 
-Because coroutine accessors like `read` and `modify` allow non-trivial finalization steps after they complete, they enable some interesting things to be expressed. One of these is that they can expose a transformed version of a stored value.
+Because coroutine accessors like `yield` and `yield inout` allow non-trivial finalization steps after they complete, they enable some interesting things to be expressed. One of these is that they can expose a transformed version of a stored value.
 
-For example, `Dictionary`'s default key-based `subscript` exposes the value as an `Optional` so that it can return `nil` if the key is not mapped. `Dictionary` doesn't actually want to store the values as `Optional`s in its internal hashtable because this would require additional storage space for every entry. When the client performs a modification access to this optional value, `Dictionary` can take advantage of the coroutine nature of `modify` by moving the current value (if present) into a temporary `Optional`, allowing the client to mutate that, and then either moving the new value back or, if it's become `nil`, removing the original entry from the hashtable. This avoids any unnecessary copies of the original value, which both avoids some low-level overhead and allows higher-level optimizations like copy-on-write uniqueness checks to continue to succeed.
+For example, `Dictionary`'s default key-based `subscript` exposes the value as an `Optional` so that it can return `nil` if the key is not mapped. `Dictionary` doesn't actually want to store the values as `Optional`s in its internal hashtable because this would require additional storage space for every entry. When the client performs a modification access to this optional value, `Dictionary` can take advantage of the coroutine nature of `yield inout` by moving the current value (if present) into a temporary `Optional`, allowing the client to mutate that, and then either moving the new value back or, if it's become `nil`, removing the original entry from the hashtable. This avoids any unnecessary copies of the original value, which both avoids some low-level overhead and allows higher-level optimizations like copy-on-write uniqueness checks to continue to succeed.
 
-Another example: providing a `Span` over the contents of a `String` can sometimes require temporary allocation to handle the case where a short `String` is stored inline. This therefore requires a coroutine `read`.
+Another example: providing a `Span` over the contents of a `String` can sometimes require temporary allocation to handle the case where a short `String` is stored inline. This therefore requires a coroutine `yield`.
 
 ### Access scopes and exclusivity
 
@@ -308,7 +308,7 @@ For example, it has been proposed that `Array` should have a `span` property. Th
 
 If the array also has non-`Escapable` elements, then the lifetime dependency of the element type of the span must be the same as the lifetime dependency of the element type of the original array.
 
-This property can return the `Span` with a `get`, and use the access scope of the borrow of the `Array`, because the span always refers to the existing memory of the array. A similar property on `String` would not have this option because `String` can store small strings in a compressed form that isn't "in memory". `String.span` would have to produce the `Span` with a `read` accessor to allow local allocation of the span's array, and it would have to return a `Span` with a lifetime dependency of the yield, not the enclosing borrow of the `String`.
+This property can return the `Span` with a `get`, and use the access scope of the borrow of the `Array`, because the span always refers to the existing memory of the array. A similar property on `String` would not have this option because `String` can store small strings in a compressed form that isn't "in memory". `String.span` would have to produce the `Span` with a `yield` accessor to allow local allocation of the span's array, and it would have to return a `Span` with a lifetime dependency of the yield, not the enclosing borrow of the `String`.
 
 In contrast, suppose that a different struct simply stores a `Span<Int>`. This would again be an instance property of the struct, but the lifetime relationship would be very different from either of the two cases above. The containing struct would have to be `~Escapable` and have its own lifetime dependency matching the dependency of the span. A copying read of that stored property (analogous to using the `get` accessor on `Array.span`) must produce a span with that same lifetime dependency, not a dependency narrowed to the access to the struct. Similarly, a write to the property must leave it holding a span with the same lifetime dependencies, or else subsequent uses of the span (or its elements) might be corrupted.
 
@@ -316,11 +316,11 @@ Reading these examples, you might be tempted to say that the span can actually h
 
 #### Scope of usability of the value
 
-When performing a storage declaration, the declaration makes guarantees about the access scope in which the value is safe to use. Like the lifetime dependencies of non-`Escapable` value types, these guarantees are intrinsic to the overall signature of the storage declaration. A storage declaration that makes a certain guarantee cannot evolve to make a weaker guarantee. Unlike the dependencies of the value type, the access scope restrictions are more specific to exactly how the access is performed. `get` and `set` accessors simply return and accept independent values, with no scope restrictions necessary. `read`, `borrow`, `modify`, and `mutate` all inherently provide access to the value only within a specific access scope, which can be narrower than any lifetime dependencies of the value itself.
+When performing a storage declaration, the declaration makes guarantees about the access scope in which the value is safe to use. Like the lifetime dependencies of non-`Escapable` value types, these guarantees are intrinsic to the overall signature of the storage declaration. A storage declaration that makes a certain guarantee cannot evolve to make a weaker guarantee. Unlike the dependencies of the value type, the access scope restrictions are more specific to exactly how the access is performed. `get` and `set` accessors simply return and accept independent values, with no scope restrictions necessary. `yield`, `borrow`, `yield inout`, and `mutate` all inherently provide access to the value only within a specific access scope, which can be narrower than any lifetime dependencies of the value itself.
 
 `borrow` and `mutate` require the access scope to be broader than the access itself because the returned value or reference must be valid to use after the accessor returns. A common choice for instance members of value types would be the access scope of `self`, which matches what value types naturally guarantee for their stored properties. But it can also be some other contextual lifetime dependency. For example, `Span.subscript` can borrow elements with a scope matching the memory dependency of the span, which is much broader than some scope associated with the subscript access, because the elements are immutable within that entire scope.
 
-By design, `read` and `modify` can provide access for a narrower scope than `borrow` and `mutate` can. The most conservative assumption is that the value or reference can only be used during the duration of the coroutine, which is to say, for the scope of the access itself. In principle, a `read` or `modify` accessor could promise that the value or reference is safe to access even after the coroutine completes. However, it's unclear why that would ever be useful, because it means that the finalization phase of the access --- the whole purpose of using a coroutine accessor in the first place --- is no longer reliably ordered after the client is done using the value or reference. For example, a `didSet`-like finalization at the end of a `modify` accessor which sends notifications whenever the value changes would potentially miss changes because the reference can still be modified after the finalization is triggered. The only useful rule appears to be that the access scope of the value/reference is nested within the coroutine.
+By design, `yield` and `yield inout` can provide access for a narrower scope than `borrow` and `mutate` can. The most conservative assumption is that the value or reference can only be used during the duration of the coroutine, which is to say, for the scope of the access itself. In principle, a `yield` or `yield inout` accessor could promise that the value or reference is safe to access even after the coroutine completes. However, it's unclear why that would ever be useful, because it means that the finalization phase of the access --- the whole purpose of using a coroutine accessor in the first place --- is no longer reliably ordered after the client is done using the value or reference. For example, a `didSet`-like finalization at the end of a `yield inout` accessor which sends notifications whenever the value changes would potentially miss changes because the reference can still be modified after the finalization is triggered. The only useful rule appears to be that the access scope of the value/reference is nested within the coroutine.
 
 ### Ownership of the containing value
 
@@ -330,7 +330,7 @@ When a storage declaration is an instance member of a value type[^1], any access
 
 The simplest case is when the member is a simple stored property. Reading from a stored property (whether borrowing or copying) requires a borrowing read of the containing value. Writing to a stored property (whether an assignment or a modification) requires a modification of the containing value.
 
-Most non-stored members of value types are still meant to behave like value members and follow the same rule as stored properties. Reading accessors (`get`, `read`, and `borrow`) are `nonmutating` methods and therefore require a borrowing read access to the containing value. Writing accessors (`set`, `modify`, and `mutate`) are `mutating` methods and therefore require a modification access to the containing value.
+Most non-stored members of value types are still meant to behave like value members and follow the same rule as stored properties. Reading accessors (`get`, `yield`, and `borrow`) are `nonmutating` methods and therefore require a borrowing read access to the containing value. Writing accessors (`set`, `yield inout`, and `mutate`) are `mutating` methods and therefore require a modification access to the containing value.
 
 However, this can be overridden by explicitly making an reading accessor `mutating`, a writing accessor `nonmutating`, or either kind of accessor `consuming`. This has ownership implications for the containing value when the accessor needs to be used. Some combinations don't make much sense, however.
 
@@ -373,13 +373,13 @@ let v2 = v.dropOldest
 
 Note that `consuming` makes no sense for setters — there is no point to changing a property on a value and then immediately ending the lifetime of that value.  Similarly, `consuming` makes no sense for `borrow` or `unsafeAddress` accessors — those require that the containing value survive for the duration of the returned borrow access or address, so it does not make sense to explicitly terminate the value lifetime immediately.
 
-This only leaves `consuming get` and `consuming read` as meaningful combinations.  A `consuming get` can be used for operations such as the `dropOldest` example above that model a transformation by creating a new value and terminating the old one.  The `consuming read` variant can be used similarly.  Unlike `borrow`, the `read` operation coroutine structure forces the containing value to live for a certain period of time, the value is consumed only at the end of that coroutine.
+This only leaves `consuming get` and `consuming yield` as meaningful combinations.  A `consuming get` can be used for operations such as the `dropOldest` example above that model a transformation by creating a new value and terminating the old one.  The `consuming yield` variant can be used similarly.  Unlike `borrow`, the `yield` operation coroutine structure forces the containing value to live for a certain period of time, the value is consumed only at the end of that coroutine.
 
 ### Implementing access kinds with other accessors
 
 Accessors can often be used to perform other kinds of access than they naturally implement. Effectively, this involves synthesizing some other kind of accessor, although the compiler often prefers to emit the appropriate code inline at use sites instead of actually creating and calling a synthetic function.
 
-This synthesis is important to understand when abstraction is required. For example, suppose a type has a property which is used to satisfy a protocol requirement that expects `read`, `modify`, and `set` accessors. The protocol conformance for the type must synthesize these accessors in terms of the actual implementation of the property. If the synthesis isn't possible, Swift must reject the conformance and report the problem to the programmer.
+This synthesis is important to understand when abstraction is required. For example, suppose a type has a property which is used to satisfy a protocol requirement that expects `yield`, `yield inout`, and `set` accessors. The protocol conformance for the type must synthesize these accessors in terms of the actual implementation of the property. If the synthesis isn't possible, Swift must reject the conformance and report the problem to the programmer.
 
 When the storage declaration is an instance member of a value type, the ownership requirement of a synthesized accessor must be compatible with all of the accesses that the synthesis requires:
 - If any of the accesses requires consuming `self`, it must be the last access performed to `self`, and the synthesized accessor must itself be `consuming`.
@@ -401,7 +401,7 @@ When synthesizing `get` using a `borrow` accessor, which must return a value bor
 
 [^2]: It *could* be less efficient if putting the value in borrowable memory is an avoidable step. For example, if the `borrow` is actually generating new values on each access, but must allocate memory to store the value so it can be borrowed, a direct `get` implementation would be more efficient than copying the value returned by `borrow`. That would be a very questionable implementation of `borrow`, however; it should really just be a `get` to begin with.
 
-That is not as true when synthesizing `get` using a `read` accessor. For one, the low-level overhead of setting up the `read` coroutine could be avoided by a direct `get` implementation. Additionally, however, a `read` coroutine is more likely to be setting up a borrow out of temporary memory, which is work that a `get` accessor could avoid by just returning the desired value directly.
+That is not as true when synthesizing `get` using a `yield` accessor. For one, the low-level overhead of setting up the `yield` coroutine could be avoided by a direct `get` implementation. Additionally, however, a `yield` coroutine is more likely to be setting up a borrow out of temporary memory, which is work that a `get` accessor could avoid by just returning the desired value directly.
 
 #### `set`
 
@@ -409,11 +409,11 @@ A `set` accessor can be synthesized using either kind of modification accessor. 
 
 When synthesizing `set` using a `mutate` accessor, which must return a reference to stable, mutable memory, this is very likely to be just as efficient as a direct implementation would have been. The synthesized `set` is just performing the assignment *after* the return rather than *before* it. Any exception is likely to be something that shouldn't have been implemented with `mutate` in the first place because the value shouldn't really be guaranteed to be in stable memory.
 
-This is less true when synthesizing `set` using a `modify` accessor. For one, the low-level overhead of setting up the `modify` coroutine could be avoided by a direct `set` implementation. Additionally, a `modify` coroutine is more likely to be setting up a mutation of temporary memory and then doing arbitrary work with the value afterwards. A direct implementation of `set` could avoid the need for the temporary, avoiding both some low-level overhead and the entire step of reading the current value only for it to be completely overwritten.
+This is less true when synthesizing `set` using a `yield inout` accessor. For one, the low-level overhead of setting up the `yield inout` coroutine could be avoided by a direct `set` implementation. Additionally, a `yield inout` coroutine is more likely to be setting up a mutation of temporary memory and then doing arbitrary work with the value afterwards. A direct implementation of `set` could avoid the need for the temporary, avoiding both some low-level overhead and the entire step of reading the current value only for it to be completely overwritten.
 
-#### `read` and `borrow`
+#### `yield` and `borrow`
 
-The borrowing read accessor `read` can be synthesized using the copying read accessor `get`:
+The borrowing read accessor `yield` can be synthesized using the copying read accessor `get`:
 
 ```swift
 let temporary = get()   // copy the current value of the storage
@@ -421,17 +421,17 @@ yield temporary         // allow the client to read the value
 _ = consume temporary   // destroy the copy
 ```
 
-This synthesized implementation requires a coroutine because the temporary must be destroyed and deallocated as a finalization step. It therefore can only be used to synthesize `read` and not `borrow`.
+This synthesized implementation requires a coroutine because the temporary must be destroyed and deallocated as a finalization step. It therefore can only be used to synthesize `yield` and not `borrow`.
 
 This synthesis usually doesn't work for non-`Copyable` value types because storage declarations of non-`Copyable` type typically cannot provide a `get` in the first place.
 
-`read` can also be synhesized using `borrow`: the coroutine calls `borrow`, yields the result, and does nothing in the finalization stage.
+`yield` can also be synhesized using `borrow`: the coroutine calls `borrow`, yields the result, and does nothing in the finalization stage.
 
 A `borrow` accessor can only be synthesized using a stored variable or an accessor with an equivalent lifetime guarantee to `borrow`, like `unsafe*Address`. Moreover, it can only be synthesized using a stored variable if exclusivity for the variable can be statically guaranteed, such as if the variable is immutable or is a stored property of a value type. Other stored variables require dynamic exclusivity checks for safety, which adds dynamic finalization to the access.
 
-#### `modify` and `mutate`
+#### `yield inout` and `mutate`
 
-A `modify` accessor can be synthesized using `get` and `set`:
+A `yield inout` accessor can be synthesized using `get` and `set`:
 
 ```swift
 var temporary = get()  // copy the current value of the storage
@@ -441,11 +441,11 @@ set(consume temporary) // replace the current value of the storage
 
 This synthesized modification access requires a coroutine model because the call to `set` is a non-trivial finalization step.
 
-Note that the `get` can itself be synthetic in this synthesis. For example, if the original storage declaration provides a `borrow` and a `set`, the `get` can be synthesized in terms of the `borrow`, and then the `modify` can be synthesized in terms of the `set` and the synthesized `get`. Any requirements for synthesizing the `get` also apply to synthesizing the `modify`; in particular, the value type must be `Copyable`.
+Note that the `get` can itself be synthetic in this synthesis. For example, if the original storage declaration provides a `borrow` and a `set`, the `get` can be synthesized in terms of the `borrow`, and then the `yield inout` can be synthesized in terms of the `set` and the synthesized `get`. Any requirements for synthesizing the `get` also apply to synthesizing the `yield inout`; in particular, the value type must be `Copyable`.
 
-Because this synthesis requires a `get`, it generally doesn't work for non-`Copyable` value types. (It could work if the storage declaration provides a `get`, but such an accessor usually can't be defined unless it's `consuming`, which would prevent the `set` from being called later.) To support modification, a storage declaration of non-`Copyable` type must generally also define either `modify` or `mutate`.
+Because this synthesis requires a `get`, it generally doesn't work for non-`Copyable` value types. (It could work if the storage declaration provides a `get`, but such an accessor usually can't be defined unless it's `consuming`, which would prevent the `set` from being called later.) To support modification, a storage declaration of non-`Copyable` type must generally also define either `yield inout` or `mutate`.
 
-A `modify` accessor can also be synthsized using `mutate` by just yielding the reference returned by the `mutate` accessor and then doing nothing in the finalization stage.
+A `yield inout` accessor can also be synthsized using `mutate` by just yielding the reference returned by the `mutate` accessor and then doing nothing in the finalization stage.
 
 A `mutate` accessor can only be synthesized using a stored variable or an accessor with an equivalent lifetime guarantee to `mutate`, like `unsafe*MutableAddress`.  Moreover, it can only be synthesized using a stored variable if exclusivity for the variable can be statically guaranteed, such as if the variable is a stored property of a value type. Other stored variables require dynamic exclusivity checks for safety, which adds dynamic finalization to the access.
 
@@ -493,20 +493,20 @@ public struct BorrowedLazySequence<Base: Sequence>: ~Escapable {
 
 This would guarantee that the original collection would never get copied. The `BorrowedLazySequence` would only be usable within the scope of a borrow of the original collection. That's fine for typical uses of lazy sequences: programmers usually just perform a few lazy operations in a row, then immediately use the result.
 
-Notice that `borrowedLazy` is implemented with a `get` here. In this document, we've described three reading accessors: `get`, `borrow`, and `read`. Why does this use `get`?
+Notice that `borrowedLazy` is implemented with a `get` here. In this document, we've described three reading accessors: `get`, `borrow`, and `yield`. Why does this use `get`?
 
 Because we're working with borrows, it's natural to expect that maybe this should use `borrow`. After all, isn't a `BorrowedLazySequence` in some sense nothing but a borrow of the original sequence? But `borrow` is not a catch-all for all operations that involve borrowing; it's used specifically when the return value is being borrowed from an existing memory location. There is no existing `BorrowedLazySequence` value in memory; this accessor needs to return a new value, albeit a scope-restricted one. Therefore, this cannot be implemented with `borrow`.
 
-Both `get` and `read` could work here. The difference is just the usual difference between `get` and `read`:
-- `read` allows dynamic finalization to be performed after the access;
-- `read` yields a borrowed value, not an owned one; and
-- `read` yields a value that is scope-restricted within the yield, not within the wider scope of the borrow of `self`.
+Both `get` and `yield` could work here. The difference is just the usual difference between `get` and `yield`:
+- `yield` allows dynamic finalization to be performed after the access;
+- `yield` yields a borrowed value, not an owned one; and
+- `yield` yields a value that is scope-restricted within the yield, not within the wider scope of the borrow of `self`.
 
 Since no dynamic finalization is required, and the value is safe to use within the wider scope of the borrow of `self`, this can be implemented with a `get`.
 
-If dynamic finalization *is* required, `read` is potentially a problematic choice because it always returns a borrowed value, which restricts what the caller can do with the value.
+If dynamic finalization *is* required, `yield` is potentially a problematic choice because it always returns a borrowed value, which restricts what the caller can do with the value.
 
-Consider a `DiscontiguousArray<T>` type with a `span` property that might need to allocate temporary memory. (We are not considering whether it is actually a good idea for such a type to offer a `span` property, just how Swift would work if it did.) This allocation requires finalization, so `get` is impossible; either the property must be implemented with `read`, or it must be redesigned as a method that passes the `Span` to a callback.
+Consider a `DiscontiguousArray<T>` type with a `span` property that might need to allocate temporary memory. (We are not considering whether it is actually a good idea for such a type to offer a `span` property, just how Swift would work if it did.) This allocation requires finalization, so `get` is impossible; either the property must be implemented with `yield`, or it must be redesigned as a method that passes the `Span` to a callback.
 
 Many uses of `Span` actually need ownership of the span. For example:
 
@@ -523,13 +523,13 @@ extension DiscontiguousArray {
 }
 ```
 
-Note the scope of the access to `self` here. The value yielded by `self.span`'s `read` accessor is `~Escapable` and scope-restricted to the yield, so the coroutine cannot be resumed until all uses of `s` are done. One way this could work is to tie it to the scope of `s`, so that the coroutine would be finished as part of leaving that scope (which in this case is always done by returning from the function). The exact language rule here will be designed and reviewed as part of the lifetime dependency feature.
+Note the scope of the access to `self` here. The value yielded by `self.span`'s `yield` accessor is `~Escapable` and scope-restricted to the yield, so the coroutine cannot be resumed until all uses of `s` are done. One way this could work is to tie it to the scope of `s`, so that the coroutine would be finished as part of leaving that scope (which in this case is always done by returning from the function). The exact language rule here will be designed and reviewed as part of the lifetime dependency feature.
 
 `self.span` yields a borrowed value, but assignment to a mutable variable generally requires an owned value, so the yielded span has to be copied as part of the assignment. This is fine because `Span` is a `Copyable` type.
 
-However, a superficially similar mutating algorithm using `MutableSpan` would not compile. First, `MutableSpan` is not a `Copyable` type. But even more importantly, all of the mutation operations on `MutableSpan` require exclusive access to the span, which the algorithm fundamentally never receives because it gets a borrowed span from the `read` accessor.
+However, a superficially similar mutating algorithm using `MutableSpan` would not compile. First, `MutableSpan` is not a `Copyable` type. But even more importantly, all of the mutation operations on `MutableSpan` require exclusive access to the span, which the algorithm fundamentally never receives because it gets a borrowed span from the `yield` accessor.
 
-To allow this, Swift would need a copying read accessor that was implemented with a coroutine. This is the counterexample to the logic laid out above in the section on the six fundamental accessors, and it makes perfect sense: the accessor is yielding an independent value that can only be used within the scope of the yield, a restriction that can be safely enforced because of the non-`Escapable` nature of the type.
+To allow this, Swift would need a copying read accessor that was implemented with a coroutine. (Perhaps this could be called `yield consuming`.) This is the counterexample to the logic laid out above in the section on the six fundamental accessors, and it makes perfect sense: the accessor is yielding an independent value that can only be used within the scope of the yield, a restriction that can be safely enforced because of the non-`Escapable` nature of the type.
 
 ## Observations and recommendations
 
@@ -541,15 +541,15 @@ No simple set of accessors covers all possible needs in the language.
 
 `get` typically requires the value type to be copyable. `set` does not by itself, but it does require copies for modification accesses (which are very common) if it's the only available way to mutate the storage. Even when copying is possible, performing an unnecessary copy imposes significant performance burdens that are sometimes unacceptable.
 
-`borrow` and `mutate` are very efficient for the cases they support, but they cannot generalize over all possible implementations, including cases as simple as mutable class properties. Even in fully concrete situations, there are good uses for finalization, like what `Dictionary.subscript` does in its `modify`.
+`borrow` and `mutate` are very efficient for the cases they support, but they cannot generalize over all possible implementations, including cases as simple as mutable class properties. Even in fully concrete situations, there are good uses for finalization, like what `Dictionary.subscript` does in its `yield inout`.
 
-`read` and `modify` require the use of coroutines, which add significant performance overhead and limit how clients can use the value (by both restricting the access scope the value is available for and forcing clients to dynamically finalize the access).
+`yield` and `yield inout` require the use of coroutines, which add significant performance overhead and limit how clients can use the value (by both restricting the access scope the value is available for and forcing clients to dynamically finalize the access).
 
 ### Some combinations are useless
 
-There is no reason to explicitly define both `borrow` and `read`. If `borrow` is possible to implement, you don't need to also implement `read`.
+There is no reason to explicitly define both `borrow` and `yield`. If `borrow` is possible to implement, you don't need to also implement `yield`.
 
-There is no reason to explicitly define both `mutate` and `modify`. If `mutate` is possible to implement, you don't need to also implement `modify`.
+There is no reason to explicitly define both `mutate` and `yield inout`. If `mutate` is possible to implement, you don't need to also implement `yield inout`.
 
 ### Address accessors are redundant with borrow/mutate
 
@@ -557,7 +557,7 @@ The `unsafe*Address` accessors should be unnecessary once we have safe `borrow` 
 
 ### Roadmap
 
-Combining the above, we expect that Swift will converge on a standard set of six accessors — `get`, `set`, `read`, `modify`, `borrow`, and `mutate` — over the next couple of years.
+Combining the above, we expect that Swift will converge on a standard set of six accessors — `get`, `set`, `yield`, `yield inout`, `borrow`, and `mutate` — over the next couple of years.
 
 In the interim, the `unsafe*Address` accessors will continue to be needed and useful for implementing many types of containers.
 
@@ -577,13 +577,13 @@ The above considerations allow us to suggest several recommended sets of accesso
 
 - A storage declaration that's trying to model an always-present stored component of a value type should just provide `borrow` and (if mutable) `mutate`.
 
-- A storage declaration that's trying to model an always-present stored component of a reference type should just provide `read` and/or `modify`, adding `get` and `set` if performance evaluations suggest it's important. See the section on synthesizing `borrow` and `mutate` for why reference types require coroutine accessors.
+- A storage declaration that's trying to model an always-present stored component of a reference type should just provide `yield` and/or `yield inout`, adding `get` and `set` if performance evaluations suggest it's important. See the section on synthesizing `borrow` and `mutate` for why reference types require coroutine accessors.
 
-- A storage declaration that presents a transformation or wrapping of a value it stores internally should provide at least `get` and `set`. It should consider providing `read` and/or `modify` if it can implement them more efficiently than they would be synthesized from the `get` and `set`.
+- A storage declaration that presents a transformation or wrapping of a value it stores internally should provide at least `get` and `set`. It should consider providing `yield` and/or `yield inout` if it can implement them more efficiently than they would be synthesized from the `get` and `set`.
 
 - An abstract storage declaration (like a protocol requirement) that's trying to ensure the most efficient access possible and is willing to only allow implementations that represent an always-present stored component of a value type should just provide `borrow` and `mutate`.
 
-- An abstract storage declaration (like a protocol requirement) that's trying to ensure the most efficient access possible without constraining its implementations should provide the full gamut of most-general accessors: `get` (if `Copyable`), `set`, `read`, and `modify`. Providing `read` and `modify` instead of `borrow` and `mutate` will restrict the scope in which the value can be used, but this is necessary when giving implementations enough additional flexibility that they might require dynamic finalization of the access.
+- An abstract storage declaration (like a protocol requirement) that's trying to ensure the most efficient access possible without constraining its implementations should provide the full gamut of most-general accessors: `get` (if `Copyable`), `set`, `yield`, and `yield inout`. Providing `yield` and `yield inout` instead of `borrow` and `mutate` will restrict the scope in which the value can be used, but this is necessary when giving implementations enough additional flexibility that they might require dynamic finalization of the access.
 
 ### `get`
 
@@ -595,11 +595,11 @@ Use `consuming get` to model transmutation operations, where the original instan
 
 ### `set`
 
-`set` is a basic operation for all mutable storage declarations. It should generally be defined unless it is straightforwardly redundant with a `modify` or `mutate` operation.
+`set` is a basic operation for all mutable storage declarations. It should generally be defined unless it is straightforwardly redundant with a `yield inout` or `mutate` operation.
 
 If `mutate` is possible to define, `set` will usually be redundant.
 
-If `set` is defined, it should usually be combined with a `modify` or `mutate` unless the definition of `modify` would be exactly the `get`/`yield`/`set` pattern that's automatically synthesized anyway.
+If `set` is defined, it should usually be combined with a `yield inout` or `mutate` unless the definition of `yield inout` would be exactly the `get`/yield/`set` pattern that's automatically synthesized anyway.
 
 ### `unsafe*Address`
 
@@ -621,17 +621,17 @@ let x = contents[0]
 
 > Important:  The above example uses unsafe pointer operations in the `subscript` implementation, but the use of pointers is completely invisible to the client source code.
 
-### `read`
+### `yield`
 
-`read` accessors are usually unnecessary when using value semantics. `read` and `borrow` generally only work well when it's possible to borrow some value that's currently in storage. When you combine that with value semantics, `borrow` is usually both possible and preferred.
+`yield` accessors are usually unnecessary when using value semantics. `yield` and `borrow` generally only work well when it's possible to borrow some value that's currently in storage. When you combine that with value semantics, `borrow` is usually both possible and preferred.
 
 If the containing value doesn't store a value of the exact type, and so the accessor has to construct it from parts anyway, it's probably best to just return that with a `get`. In principle, you can imagine taking those parts, building them into the new value without copies, and then putting them all back at the end of the access, but this is generally not allowed in a `nonmutating` accessor because the access cannot be assumed to be exclusive.
 
-`read` accessors are necessary when borrowing out of mutable reference-semantics memory that has to be protected by dynamic exclusivity checks.
+`yield` accessors are necessary when borrowing out of mutable reference-semantics memory that has to be protected by dynamic exclusivity checks.
 
-`read` accessors can also theoretically be beneficial when something about the decisions above is dynamic: for example, it's possible to borrow the value directly out of memory, but only in some cases, and otherwise some kind of transformation applies. But in this case, it should almost certainly be combined with a `get` if possible so that copying read accesses aren't punished by the coroutine overhead.
+`yield` accessors can also theoretically be beneficial when something about the decisions above is dynamic: for example, it's possible to borrow the value directly out of memory, but only in some cases, and otherwise some kind of transformation applies. But in this case, it should almost certainly be combined with a `get` if possible so that copying read accesses aren't punished by the coroutine overhead.
 
-The borrowed value yielded by `read` is always scoped to a narrow, unique lifetime tied to the duration of the coroutine, rather than to anything that outlives the current access:
+The borrowed value yielded by `yield` is always scoped to a narrow, unique lifetime tied to the duration of the coroutine, rather than to anything that outlives the current access:
 
 ```swift
 extension Foo {
@@ -669,9 +669,9 @@ When it becomes available, `borrow` will be the most efficient way to provide re
 - already exist in memory or
 - will will be stored in memory by the end of the accessor (e.g. because the accessor computes the value and then memoizes it).
 
-It is particularly important to provide `borrow` or `read` access to values that either noncopyable or expensive to copy (for example, because they are large).  This includes values with generic type that might be either noncopyable or expensive to copy. Of these two options, `borrow` should be preferred whenever it is possible to use. Most generic data structures should provide access to their data via `borrow` accessors.
+It is particularly important to provide `borrow` or `yield` access to values that either noncopyable or expensive to copy (for example, because they are large).  This includes values with generic type that might be either noncopyable or expensive to copy. Of these two options, `borrow` should be preferred whenever it is possible to use. Most generic data structures should provide access to their data via `borrow` accessors.
 
-Compare how the example from the `read` section would work with a `borrow` implementation:
+Compare how the example from the `yield` section would work with a `borrow` implementation:
 
 ```swift
 extension Foo {
@@ -687,7 +687,7 @@ func access(foo: Foo) -> borrowing NonCopyableType {
 }
 ```
 
-Unlike the `read` version, this form has no problems returning the borrowed value.  This requires a new “borrowing returns” language feature which would track the reliance on `foo` and ensure that `foo` was not modified for as long as the value borrowed from it was being accessed.
+Unlike the `yield` version, this form has no problems returning the borrowed value.  This requires a new “borrowing returns” language feature which would track the reliance on `foo` and ensure that `foo` was not modified for as long as the value borrowed from it was being accessed.
 
 Compared to `unsafeAddress`, `borrow` provides the same functionality without the need to do any explicit pointer manipulation.  The subscript implementation here is written as if it returned the value, but the implementation only uses safe constructs:
 
@@ -703,19 +703,19 @@ struct MyContainer<T> {
 
 > Note:  Swift’s implementation of borrowed arguments uses “bitwise borrowing” in many cases, which avoids introducing extra indirection by directly sharing the representation of the value rather than just sharing a pointer. The goal is that ensure that borrowing is never less efficient than copying. We are exploring whether a similar idea can work for `borrow` accessors; abstraction may sometimes make it impossible.
 
-### `modify`
+### `yield inout`
 
-Unlike `read`, `modify` is broadly useful despite being a coroutine. `modify` and `mutate` allow modification accesses to potentially work on values in-place rather than requiring them to be copied. This is very important for many types, including data structures like `String`, `Array`, and `Dictionary`, as well as any other large or non-copyable type.
+Unlike `yield`, `yield inout` is broadly useful despite being a coroutine. `yield inout` and `mutate` allow modification accesses to potentially work on values in-place rather than requiring them to be copied. This is very important for many types, including data structures like `String`, `Array`, and `Dictionary`, as well as any other large or non-copyable type.
 
-There are two principal exceptions where there's no reason to provide either `modify` or `mutate`:
+There are two principal exceptions where there's no reason to provide either `yield inout` or `mutate`:
 
 - The value type is truly trivial to copy, such as a simple `Int`, `Double`, or `Bool`.
 
-- The `modify` would just be equivalent to the `get`/`yield`/`set` pattern that Swift can automatically synthesize. This includes cases such as when the old value needs to be copied before the modification in order to compare values after the modification is complete.
+- The `yield inout` would just be equivalent to the `get`/yield/`set` pattern that Swift can automatically synthesize. This includes cases such as when the old value needs to be copied before the modification in order to compare values after the modification is complete.
 
-The efficient pattern for transformed values that doesn't work with `read` because it's a nonmutating method *does* generally work for `modify`, which is typically `mutating`. `Dictionary` uses exactly this trick internally.
+The efficient pattern for transformed values that doesn't work with `yield` because it's a nonmutating method *does* generally work for `yield inout`, which is typically `mutating` and therefore does not need to concern itself with simultaneous accesses. `Dictionary` uses exactly this trick internally.
 
-`mutate` is more efficient than `modify` when it's possible to define. However, when writing memory-safe code, `mutate` generally requires the memory being referenced to behave like a value-semantics component of the containing value type:
+`mutate` is more efficient than `yield inout` when it's possible to define. However, when writing memory-safe code, `mutate` generally requires the memory being referenced to behave like a value-semantics component of the containing value type:
 
 - the memory can only be accessed during some kind of access to the containing value, and
 
@@ -727,7 +727,7 @@ If these two properties aren't true, then the only way to enforce exclusivity is
 
 A `mutate` accessor can be thought of as a “reverse `inout`”. In fact, some discussions have advocated using the term “inout” for this accessor.
 
-As with `read`, this requires a new return capability that internally returns a reference to the stored value and tracks the lifetime of that reference against the lifetime of the containing value:
+As with `borrow`, this requires a new return capability that internally returns a reference to the stored value and tracks the lifetime of that reference against the lifetime of the containing value:
 
 ```swift
 extension Foo {
@@ -748,15 +748,15 @@ func access(foo: Foo) -> mutating NonCopyableType {
 The current status of the accessors described above is:
 
 * `get`/`set` are fully supported, standard parts of the Swift language.
-* `_read` / `_modify` have been implemented in the compiler for some time as an experimental form of `read`/`modify`.  The underscored forms will continue to be supported in the compiler for the foreseeable future until all existing users have migrated.
-* `read`/`modify` will be the final standard form.  We expect to have these implemented in the compiler and ready for Swift Evolution review in the coming months.
+* `_read` / `_modify` have been implemented in the compiler for some time as an experimental form of `yield`/`yield inout`.  The underscored forms will continue to be supported in the compiler for the foreseeable future until all existing users have migrated.
+* `yield`/`yield inout` will be the final standard form.  We expect to have these implemented in the compiler and ready for Swift Evolution review in the coming months.
 * `unsafeAddress`, `unsafeMutableAddress` are implemented in the compiler today (with some limitations).  We do not expect to ever submit them for Swift Evolution review.
 * We hope to have experimental implementations of `borrow` and `mutate` in another year or two and submit them for Swift Evolution at that time.
 
 There are a number of open questions that will need to be resolved in the process of implementing the above:
 
 * Protocols can specify `get` and `set` requirements for properties.  We will want them to be able to specify other accessor types as well.
-* The current experimental `_read` and `_modify` implementation has some performance problems with certain types of generic code.  We will want to resolve this for the final `read` and `modify` implementation.
+* The current experimental `_read` and `_modify` implementation has some performance problems with certain types of generic code.  We will want to resolve this for the final `yield` and `yield inout` implementation.
 * The `borrow` and `mutate` accessor implementations will require new return value conventions to be fully useful.
 
 Of course, everything in this document is subject to community review through the Swift Evolution process.
