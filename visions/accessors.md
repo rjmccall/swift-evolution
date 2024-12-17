@@ -66,11 +66,11 @@ protocol Nameable {
   var name: String { get }
 }
 
-printNameConcretely(_ person: Person) {
+func printNameConcretely(_ person: Person) {
   print(person.name)
 }
 
-printNameGenerically(_ person: any Nameable) {
+func printNameGenerically(_ person: any Nameable) {
   print(person.name)
 }
 ```
