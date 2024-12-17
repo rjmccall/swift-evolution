@@ -11,7 +11,7 @@ struct Foo {
 }
 ```
 
-In this case, the `get` accessor behaves just like a `nonmutating` method that returns a value of the property's type, while the `set` accessor behaves just a `mutating` method that receives a value of the property's type as an argument.
+In this case, the `get` accessor behaves just like a `nonmutating` method that returns a value of the property's type, while the `set` accessor behaves just like a `mutating` method that receives a value of the property's type as an argument.
 
 The `get` and `set` accessors are ideal for implementing operations that copy the current value of the property:
 
@@ -25,7 +25,7 @@ or that overwrite the current value of the property:
 myFoo.value = 51        // calls the set accessor for Foo.value
 ```
 
-Other kinds of operations can also be compiled in terms of `get` and `set`. For example, if you pass a computed property as an `inout` argument:
+Other kinds of operations can also be defined in terms of `get` and `set`. For example, if you pass a computed property as an `inout` argument:
 
 ```swift
 myFoo.value += 10
@@ -43,7 +43,7 @@ However, this approach has significant problems. The biggest is that the `get` a
 
 1. It adds the runtime performance and memory overhead of copying the inline representation of the value. For example, if the value is an `Array`, the internal buffer of the array must be retained.
 
-2. It can make subsequent uses of the value less efficient. For example, if the value uses a copy-on-write representation like `Array` and `String` do, mutating a copy is likely to dramatically less efficient than mutating a variable in place. (We will explain this in more detail later.)
+2. It can make subsequent uses of the value less efficient. For example, if the value uses a copy-on-write representation like `Array` and `String` do, mutating a copy is likely to be dramatically less efficient than mutating a variable in place. (We will explain this in more detail later.)
 
 3. It requires the value to be copyable at all, and so it inherently cannot work for values of non-`Copyable` type.
 
@@ -79,7 +79,7 @@ In `printNameConcretely`, Swift knows that `name` is a stored property of `Perso
 
 As a result, Swift has explored a variety of other accessors throughout its history, none of which have ever been officially added to the language through the Swift Evolution process. (The observing accessors, `willSet` and `didSet`, are officially in the language but are arguably in a different category because they don't serve as complete operations.) Many of these have been adopted in the standard library for years, but we've been reluctant to make them official because they are variously incomplete, unsafe, or complex.
 
-This vision document lays out the design space of accessors for the next few years, as Swift continues to advance its support for non-`Copyable` and non-`Escapable` types. It explains Swift's basic access model and how it may need to evolve. It explores what developers need from accessors in these advanced situations. Finally, it discusses different kinds of accessors, both existing and under consideration, and how they do or not fit into the future of the language as we see it.
+This vision document lays out the design space of accessors for the next few years, as Swift continues to advance its support for non-`Copyable` and non-`Escapable` types. It explains Swift's basic access model and how it may need to evolve. It explores what developers need from accessors in these advanced situations. Finally, it discusses different kinds of accessors, both existing and under consideration, and how they do or do not fit into the future of the language as we see it.
 
 This is a prospective vision which has not yet been reviewed by the Language Steering Group. Even if it is approved by the Language Steering Group in exactly this form, it is merely laying out a high-level vision for the language design and does not constitute pre-approval of any specific ideas in this document. Everything in this document will need to be separately proposed and reviewed under the normal Swift Evolution process before it is part of the Swift language.
 
@@ -145,7 +145,7 @@ These two examples have a common characteristic: the implementations do not need
 
 For one, it is very common when using value semantics. If a storage declaration is implemented by just keeping the value somewhere in memory, and exclusivity for that memory is guaranteed statically by the exclusivity of the containing value, there's nothing to do as finalization. This covers stored properties of value types and the vast majority of data structures.
 
-But it's also really useful because it frees the client of the burden of running code when the access ends. The general pattern that we described above has to run in two distinct phases. That makes it inherently something like a coroutine: it's going to be split into multiple functions, and it might have to dynamically allocate memory to pass between them. The client must then keep all of this information around dynamically for each access it performs. If the client starts a dynamic number of accesses at once, it will need dynamic allocation to remember all of the active accesses. In contrast, if finalization is guaranteed to be trivial, the implementation of the access can work more like a normal function: the function will just perform the first phase and pass back whatever it needs to as a return value. The client has nothing to track, so it can manage even a dynamic number of accesses completely statically.
+But it's also really useful because it frees the client of the burden of running code when the access ends. The general pattern that we described above has to run in two distinct phases. That makes it inherently something like a coroutine: it's going to be split into multiple functions, and it might have to dynamically allocate memory to pass between them. The client must then keep all of this information around dynamically for each access it performs. If the client starts a dynamic number of accesses at once (such as by starting an access on each iteration of a loop), it will need dynamic allocation to remember all of the active accesses. In contrast, if there's a guarantee that finalization is unnecessary, the implementation of the access can work more like a normal function: the function will just perform the first phase and pass back whatever it needs to as a return value. The client has nothing to track, so it can manage even a dynamic number of accesses completely statically.
 
 ## Six of Eight Fundamental Accessors
 
@@ -189,7 +189,7 @@ A storage declaration can usefully define both a `set` accessor and a modificati
 
 The `yield` accessor is the natural most-general model of a borrowing read access. It is a coroutine function which yields a borrowed value and can then do arbitrary finalization when resumed.
 
-The `borrow` accessor is a specialization of that model which expresses that no finalization is required. It is an ordinary function that returns a borrowed value. Swift should be able to return borrowed value without adding pointer indirection for simple types. The compiler must prove that the borrow is valid within some some that encloses the call to the accessor.
+The `borrow` accessor is a specialization of that model which expresses that no finalization is required. It is an ordinary function that returns a borrowed value. Swift should be able to return a borrowed value without adding pointer indirection for simple types. The compiler must prove that the borrow is valid within some that encloses the call to the accessor.
 
 Both of these accessors naturally work for non-`Copyable` value types.
 
@@ -237,7 +237,7 @@ We've already discussed many of the differences between accessors that implement
 
 It might seem that borrowing is strictly better, and in a narrow way that's true: in isolation, it is cheaper to borrow a value out of memory than to copy it. However, borrowing by its nature is *scoped*. This means that there is some duration within the execution of the program during which the borrow is valid. Within this duration, Swift must ensure that no code tries to write to the memory that's been borrowed from. Outside of this duration, Swift must ensure that the borrowed value stops being used. So borrowing can only possibly work if Swift can figure out a scope that it can safely make those two guarantees for.
 
-Unfortunately, doing that in arbitrary code is not reliably possible. Swift frequently inserts implicit conservative copies because it cannot figure out that it could have safely borrowed. A hypothetical Non-Copying Swift that refused to do this would often force programmers to either insert those same copies explicitly or find a clever way to restructure their code to make borrowing possible. It is reasonable to argue that that would not a good trade-off for most code, where the cost of copying is likely small and the usability costs would be quite high.
+Unfortunately, doing that in arbitrary code is not reliably possible. Swift frequently inserts implicit conservative copies because it cannot figure out that it could have safely borrowed. A hypothetical Non-Copying Swift that refused to do this would often force programmers to either insert those same copies explicitly or find a clever way to restructure their code to make borrowing possible. By inserting its conservative copies, Swift is implicitly arguing that this is not a good trade-off for most code, where the cost of copying is likely small and the usability costs would be quite high.
 
 Furthermore, if a borrow has to be done with a `yield` accessor, the coroutine nature of the accessor also has to be considered, because that comes with its own overhead. This is particularly true if the value is going to be copied anyway and so the coroutine ultimately provided no benefit.
 
@@ -308,7 +308,7 @@ For example, it has been proposed that `Array` should have a `span` property. Th
 
 If the array also has non-`Escapable` elements, then the lifetime dependency of the element type of the span must be the same as the lifetime dependency of the element type of the original array.
 
-This property can return the `Span` with a `get`, and use the access scope of the borrow of the `Array`, because the span always refers to the existing memory of the array. A similar property on `String` would not have this option because `String` can store small strings in a compressed form that isn't "in memory". `String.span` would have to produce the `Span` with a `yield` accessor to allow local allocation of the span's array, and it would have to return a `Span` with a lifetime dependency of the yield, not the enclosing borrow of the `String`.
+This property can return the `Span` with a `get`, and use the access scope of the borrow of the `Array`, because the span always refers to the existing memory of the array. A similar property on `String` might not have this option because `String` can store small strings in a compressed form that isn't "in memory". We are looking at whether this problem can be narrowly addressed, but if not, `String.span` would have to produce the `Span` with a `yield` accessor to allow local allocation of the span's array, and it would have to return a `Span` with a lifetime dependency of the yield, not the enclosing borrow of the `String`.
 
 In contrast, suppose that a different struct simply stores a `Span<Int>`. This would again be an instance property of the struct, but the lifetime relationship would be very different from either of the two cases above. The containing struct would have to be `~Escapable` and have its own lifetime dependency matching the dependency of the span. A copying read of that stored property (analogous to using the `get` accessor on `Array.span`) must produce a span with that same lifetime dependency, not a dependency narrowed to the access to the struct. Similarly, a write to the property must leave it holding a span with the same lifetime dependencies, or else subsequent uses of the span (or its elements) might be corrupted.
 
@@ -316,7 +316,7 @@ Reading these examples, you might be tempted to say that the span can actually h
 
 #### Scope of usability of the value
 
-When performing a storage declaration, the declaration makes guarantees about the access scope in which the value is safe to use. Like the lifetime dependencies of non-`Escapable` value types, these guarantees are intrinsic to the overall signature of the storage declaration. A storage declaration that makes a certain guarantee cannot evolve to make a weaker guarantee. Unlike the dependencies of the value type, the access scope restrictions are more specific to exactly how the access is performed. `get` and `set` accessors simply return and accept independent values, with no scope restrictions necessary. `yield`, `borrow`, `yield inout`, and `mutate` all inherently provide access to the value only within a specific access scope, which can be narrower than any lifetime dependencies of the value itself.
+When reading or modifying a storage declaration, the declaration makes guarantees about the access scope in which the value is safe to use. Like the lifetime dependencies of non-`Escapable` value types, these guarantees are intrinsic to the overall signature of the storage declaration. A storage declaration that makes a certain guarantee cannot evolve to make a weaker guarantee. Unlike the dependencies of the value type, the access scope restrictions are more specific to exactly how the access is performed. `get` and `set` accessors simply return and accept independent values, with no scope restrictions necessary. `yield`, `borrow`, `yield inout`, and `mutate` all inherently provide access to the value only within a specific access scope, which can be narrower than any lifetime dependencies of the value itself.
 
 `borrow` and `mutate` require the access scope to be broader than the access itself because the returned value or reference must be valid to use after the accessor returns. A common choice for instance members of value types would be the access scope of `self`, which matches what value types naturally guarantee for their stored properties. But it can also be some other contextual lifetime dependency. For example, `Span.subscript` can borrow elements with a scope matching the memory dependency of the span, which is much broader than some scope associated with the subscript access, because the elements are immutable within that entire scope.
 
