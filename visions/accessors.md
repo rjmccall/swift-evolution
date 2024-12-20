@@ -102,16 +102,16 @@ An assignment (or write) access conceptually means that the storage is being com
 A modification (or update, or read-write) access conceptually means that the storage is being both read and written. It occurs when:
 - a storage reference expression is passed as an `inout` argument, including as the left operand of a compound assignment operator like `+=`; or
 - a storage reference expression is the base expression of another storage reference expression that must mutate its base in order to perform its own requested access. For example, in `base.value = 10`, the access to `base` is:
-  - a modification if `value` is a stored property of a value type,
+  - a modification if `value` is a stored property of a `struct` or an element of a tuple,
   - a modification if `value` is defined with a `mutating set`,
-  - a read if `value` is a stored property of a reference type, or
+  - a read if `value` is a stored property of a `class` or `actor`, or
   - a read if `value` is defined with a `nonmutating set`.
 
 The old manifesto's description of modification and assignment accesses has stood up to time, but its description of read accesses arguably has not. As more advanced ownership features have developed in the language, Swift has increasingly needed to distinguish at least two kinds of reads:
 
 A *copying read access* conceptually means that the current value of the storage is being copied (or consumed) to produce an independent value. At minimum, it occurs when the storage reference expression appears in any context where an independent value is required, such as a return value or as the right operand of the `=` operator.
 
-A *borrowing read access* conceptually means that the current value of the storage is being temporarily borrowed in order to read it without copying it. At minimum, it occurs when the storage reference expression is appears in any context where an implicit copy is not allowed, such as passing it as a `borrowing` argument when the value is non-`Copyable`.
+A *borrowing read access* conceptually means that the current value of the storage is being temporarily borrowed in order to read it without copying it. At minimum, it occurs when the storage reference expression appears in any non-mutating context where an implicit copy is not allowed, such as being passed as a `borrowing` argument when the value is non-`Copyable`.
 
 The semantic and implementation-level differences between borrowing and copying/consuming uses will be very important in this document.
 
