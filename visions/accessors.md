@@ -77,7 +77,7 @@ func printNameGenerically(_ person: any Nameable) {
 
 In `printNameConcretely`, Swift knows that `name` is a stored property of `Person`, and it can just load that value directly from `person` and pass it to `print`. In `printNameGenerically`, Swift does not know how `name` is implemented, and it must call a `get` accessor to copy the current value of the name. To avoid those costs, the Swift optimizer would have to specialize this function for the specific type that is being passed in; this is something that Swift can and does do, but only as a best-effort optimization, which is not always good enough. And, of course, this code would be ill-formed if `String` were a non-`Copyable` type, because the only way to satisfy a `get` requirement for a stored property is to copy the current value.
 
-As a result, Swift has explored a variety of other accessors throughout its history, none of which have ever been officially added to the language through the Swift Evolution process. (The observing accessors, `willSet` and `didSet`, are officially in the language but are arguably in a different category because they don't serve as complete operations.) Many of these have been adopted in the standard library for years, but we've been reluctant to make them official because they are variously incomplete, unsafe, or complex.
+As a result, Swift has explored a variety of other accessors throughout its history, none of which have ever been officially added to the language through the Swift Evolution process. (The [observing accessors](#observing-accessors), `willSet` and `didSet`, are officially in the language but are categorically different.) Many of these have been adopted in the standard library for years, but we've been reluctant to make them official because they are variously incomplete, unsafe, or complex.
 
 This vision document lays out the design space of accessors for the next few years, as Swift continues to advance its support for non-`Copyable` and non-`Escapable` types. It explains Swift's basic access model and how it may need to evolve. It explores what developers need from accessors in these advanced situations. Finally, it discusses different kinds of accessors, both existing and under consideration, and how they do or do not fit into the future of the language as we see it.
 
@@ -449,6 +449,59 @@ A `yield inout` accessor can also be synthsized using `mutate` by just yielding 
 
 A `mutate` accessor can only be synthesized using a stored variable or an accessor with an equivalent lifetime guarantee to `mutate`, like `unsafe*MutableAddress`.  Moreover, it can only be synthesized using a stored variable if exclusivity for the variable can be statically guaranteed, such as if the variable is a stored property of a value type. Other stored variables require dynamic exclusivity checks for safety, which adds dynamic finalization to the access.
 
+### Observing accessors
+
+The observing accessors, `willSet` and `didSet`, are categorically different from other accessors because they do not fully implement any of the basic access kinds. Instead, they "decorate" an underlying implementation. Usually, the underlying implementation is a stored variable, but it can also be inherited from a superclass if the accessor is added in an override. Observing accessors can never combined with non-observing accessors.
+
+Read accesses to a storage declaration with observing accessors always go directly to the underlying implementation.[^3] They can be copying reads or borrowing reads if the underlying implementation allows it.
+
+[^3]: As the current module sees it. If you add observing accessors in an override of a non-`frozen` superclass property defined in a different module with a stable binary interface, the access to the superclass property will be constrained by what's available in the binary interface.
+
+Write accesses to a storage declaration with observing accessors always trigger a call to the accessor(s). The exact behavior depends on which accessors are provided and whether the `didSet` is "simple" (doesn't use its old value argument) as specified by [SE-0268][].
+
+An assignment access behaves as if it were calling a `set` accessor synthesized as follows:
+
+```swift
+set(newValue) {
+#if <there's a non-simple `didSet` accessor>
+  let oldValue = underlyingStorage
+#endif
+
+#if <there's a `willSet` accessor>
+  willSet(newValue)
+#endif
+
+  underlyingStorage = newValue
+
+#if <there's a non-simple `didSet` accessor>
+  didSet(oldValue)
+#elseif <there's a simple `didSet` accessor>
+  didSet()
+#endif
+}
+```
+
+If the storage declaration only provides a simple `didSet`, then a modification access is performed "in place" on the undertlying storage, and then `didSet` is called. This matches the behavior of calling a `yield inout` accessor synthesized as follows:
+
+```swift
+yield inout {
+  yield &underlyingStorage
+  didSet()
+}
+```
+
+Otherwise, modifications are performed on a temporary produced by copying the underlying storage, which is then written back with the setter above:
+
+```swift
+yield inout {
+  var temporary = underlyingStorage
+  yield &temporary
+  set(temporary)
+}
+```
+
+Note that this exactly matches the rule for synthesizing `yield inout` for a storage declaration with `get` and `set` accessors. As usual, this is ill-formed if it is not possible to perform a copying read of the underlying storage (such as if it is a stored variable of non-`Copyable` type).
+
 ### Values that represent accesses
 
 It is often useful to build up values from other values. A simple example is that wrapping a value in `Optional` technically makes a new value that stores the old value inside it. A more complex example might be a struct that combines a `TouristSite` with its interest score and its distance from your hotel, for use in planning a trip to a city. In any case, the easiest way to do this is generally to copy the value into the new compound value. But if you're working with non-`Copyable` types, or if you simply need to avoid copying for performance reasons, that may not be acceptable or even allowed.
@@ -761,6 +814,7 @@ There are a number of open questions that will need to be resolved in the proces
 
 Of course, everything in this document is subject to community review through the Swift Evolution process.
 
+[SE-0268]: https://github.com/swiftlang/swift-evolution/blob/main/proposals/0268-didset-semantics.md
 [SE-0446]: https://github.com/swiftlang/swift-evolution/blob/main/proposals/0446-non-escapable.md
 [SE-0447]: https://github.com/swiftlang/swift-evolution/blob/main/proposals/0447-span-access-shared-contiguous-storage.md
 [SE-0453]: https://github.com/swiftlang/swift-evolution/blob/main/proposals/0453-vector.md
