@@ -584,6 +584,44 @@ However, a superficially similar mutating algorithm using `MutableSpan` would no
 
 To allow this, Swift would need a copying read accessor that was implemented with a coroutine. (Perhaps this could be called `yield consuming`.) This is the counterexample to the logic laid out above in the section on the six fundamental accessors, and it makes perfect sense: the accessor is yielding an independent value that can only be used within the scope of the yield, a restriction that can be safely enforced because of the non-`Escapable` nature of the type.
 
+### Effects
+
+Swift has direct support for two kinds of function effect: error propagation (`throws`) and asynchronous suspension (`async`). Concrete accesses to memory don't normally result in either of these effects, but it can be useful to allow abstract accesses to have them, and programmers will generally understand what that means: the code that must be executed in order to perform the abstract access can have one or both of these effects.
+
+For example, the `value` property of a `Task` has a `get` accessor that is both `async` and (potentially) `throws`. This reflects the fact that reading the value is an asynchronous operation that can block the current task, as well as the fact that the `Task` function can throw. (If the function cannot throw, the `Task` should use `Never` as its `Failure` type argument, and then Swift will know that reading `value` statically cannot throw, either.)
+
+Currently, Swift only allows effects on `get` accessors, and only for immutable storage. There's no fundamental language design reason for this restriction; the language implementation simply doesn't yet support effectful coroutines.
+
+A synthesized accessor must combine the effects of all of the accessors it uses. That is, if a computed property is implemented with an `async` `get` accessor and a `throws` `set` accessor, a synthesized `yield inout` (and modification accesses in general) is both `async` and `throws`. Error types would have to be unified using the `errorUnion` rule described in [SE-0413][]. This is not an issue in Swift today because there is no meaningful synthesis of effectful accessors given the restriction mentioned above.
+
+### Key paths
+
+In principle, key paths are meant to abstractly specify an arbitrary path of properties and subscript accesses. However, Swift gives programmers a great deal of flexibility about what can be expressed with accessors:
+
+- Any of the four basic access kinds may or may not:
+  - mutate or consume the base value,
+  - throw an error, or
+  - asynchronously suspend.
+
+- If the value type of the key path is non-`Copyable`, there may or may not be any way to access it with a copying read access.
+
+- The lifetime of a borrowing read or modification may be limited to a coroutine scope (q.v. `yield` and `yield inout`), or it may only be restricted to the scope of the access to the base (q.v. `borrow` and `inout`).
+
+Furthermore, the key path value itself may have value limitations (such as [non-sendability][SE-0418]) because of captured subscript indices.
+
+Each of these adds its own dimension of complexity for both the type system of key paths and the runtime support for them. Trying to support all possible combinations would become a huge drag on language development, and many of them would have minimal if any use in practice. Swift has instead generally taken the approach of only support certain combinations. For example, the distinction between `WritableKeyPath` and `ReferenceWritableKeyPath` is that the assignment and modifications are `mutating` for the former and non-`mutating` for the latter, and this reflects the default rules for properties on structs and classes, respectively. However, there is no `KeyPath` type that supports properties with `mutating` `get` accessors, and while this has doubtlessly occasionally been annoying to some users, it has largely been an acceptable compromise for the focus of language development.
+
+The new accessor features discussed in this vision are likely to receive a similar treatment. The builtin `subscript(keyPath:)` storage declaration allows the path to be read with either a borrow or a copy. The key path runtime supports all four basic access kinds, but its borrow and modification accesses present a coroutine interface, and they do not support `async` or `throws` accessors. A storage declaration that cannot satisfy those requirements may remain indefinitely unusable in key paths. Specifically, that includes when:
+
+- read accesses to the storage are `mutating`,
+- any of the storage's accessors are `consuming`,
+- any of the storage's accessors are `async` or `throws`, or
+- the value type of the storage is non-`Copyable`.
+
+Otherwise, it should always be possible to synthesize accessors that work with the key path runtime. For example, a `subscript` with `borrow` and `inout` accessors should still be usable in a key path; yielded values will simply lose the stronger lifetime guarantees of the original accessors and will be restricted to a coroutine scope when accessed through `subscript(keyPath:)`.
+
+Allowing non-`Copyable` value types in key paths is a potential future direction, but it would require a careful approach. Abstract storage of non-`Copyable` type generally supports exactly one of being borrowed, being consumed, or being "copied" by creating a new value. We are very unlikely to want to enhance the `KeyPath` type system to express all of these alternatives. If Swift can force key paths of non-`Copyable` type to be only ever be read with a borrow, that would allow key paths to be created from stored properties of non-`Copyable` type. That is probably the best choice for expressivity, but it would rule out using key paths for storage that creates new values with a `get`.
+
 ## Observations and recommendations
 
 Based on the above considerations, we can make a few useful observations about how these different accessors complement one another:
@@ -815,6 +853,8 @@ There are a number of open questions that will need to be resolved in the proces
 Of course, everything in this document is subject to community review through the Swift Evolution process.
 
 [SE-0268]: https://github.com/swiftlang/swift-evolution/blob/main/proposals/0268-didset-semantics.md
+[SE-0413]: https://github.com/swiftlang/swift-evolution/blob/main/proposals/0413-typed-throws.md
+[SE-0418]: https://github.com/swiftlang/swift-evolution/blob/main/proposals/0418-inferring-sendable-for-methods.md
 [SE-0446]: https://github.com/swiftlang/swift-evolution/blob/main/proposals/0446-non-escapable.md
 [SE-0447]: https://github.com/swiftlang/swift-evolution/blob/main/proposals/0447-span-access-shared-contiguous-storage.md
 [SE-0453]: https://github.com/swiftlang/swift-evolution/blob/main/proposals/0453-vector.md
