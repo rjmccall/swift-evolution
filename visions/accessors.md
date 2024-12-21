@@ -502,6 +502,124 @@ yield inout {
 
 Note that this exactly matches the rule for synthesizing `yield inout` for a storage declaration with `get` and `set` accessors. As usual, this is ill-formed if it is not possible to perform a copying read of the underlying storage (such as if it is a stored variable of non-`Copyable` type).
 
+### Library evolution and source and binary compatibility
+
+Libraries evolve, and as they do, their authors often need to change the implementation of the library's existing public APIs. Authors are usually very concerned about whether such changes will cause compatibility problems for their existing users. Swift's design for source and binary compatibility centers around the concept of a declaration's *signature* as separate from its *implementation*. In general, changes to the signature of a declaration are prone to creating source and binary compatibility issues, while changes just to the implementation should not.[^4] However, the dividing line in this dichotomy is not always bright. Accessors introduce novel issues around what counts as signature, and those issues are growing in number as Swift continues to develop its support for advanced ownership features.
+
+[^4]: At least, not within the scope of the language's ability to provide guidance. If a library author changes a function to abort on inputs that it previously accepted without comment, that can cause compatibility problems, but it's not really something the language has much to say about.
+
+Binary compatibility can generally be thought of as a stricter set of requirements than source compatibility. A library that maintains a stable binary interface (its *ABI*) typically also desires to maintain a stable source interface: old code that gets rebuilt should still work the same way. So anything that would break source compatibility is usually also a problem for binary compatibility. We can sometimes take advantage of this, in fact: if we cannot think of an ABI-stable way to support either of two implementations, but switching between them would be likely to break source compatibility, it may be acceptable to simply declare that such a change is never ABI-stable.
+
+For many years, the signature of a storage declaration in Swift has consisted of four points:
+- its value type;
+- its index parameters, if it's a `subscript`;
+- whether it's mutable; and
+- the effects of each of its basic access operations:
+  - whether it potentially mutates the base value (where applicable),
+  - whether it throws, and
+  - whether it is `async`.
+
+In particular, the exact set of accessors has never been part of the signature, except in as much as it affects one of the points above (e.g. by not providing any way to mutate the storage). This means that, if you're writing a library that's distributed as source, you should be able to completely change how a particular declaration is implemented, and your users should not have compatibility problems as long as you haven't changed one of the points above.
+
+For example, suppose an old release of your library has this a property:
+
+```swift
+struct Person {
+  var age: Int
+}
+```
+
+and you've changed it in a new release like so:
+
+```swift
+var globalCurrentYear: Int = ...
+
+struct Person {
+  var birthYear: Int
+  var age: Int {
+    get {
+      return globalCurrentYear - birthYear
+    }
+    set {
+      birthYear = globalCurrentYear - newValue
+    }
+  }
+}
+```
+
+`get` on a struct property defaults to being non-mutating, and `set` defaults to being mutating, which of course match the rules for reads and writes to stored properties. Therefore, the value type, mutability, and access operation effects of this property are still the same, so this change is source-compatible. Analyzing the effects can be a little tricky in corner cases; people looking at `get` and `set` accessors often forget to think about modification accesses, which must call both accessors and therefore combine their effects. But this only has different effects from `set` if `get` has more effects, which is very uncommon, so usually this works out okay.
+
+If this module maintains a stable ABI, this change is also binary-compatible. That's because Swift defaults to hiding the implementation of storage declarations when crossing stable ABI boundaries. Instead, Swift picks a set of accessors to use as the ABI, typically without depending on the current implementation (but there is an exception for non-`Copyable` value types). For immutable storage, this is just `get`. For mutable storage, it is `get`, `set`, and `_modify`. These accessors will be synthesized (if necessary) from whatever accessors are currently available, and accesses from outside of the module will always use the stable ABI accessors instead of making assumptions about the actual implementation.
+
+The ownership features now being introduced to Swift (starting in the last few years and continuing with the features in this vision) have added a few new considerations to this idea of the signature of a storage declaration.
+
+#### Consuming accessors
+
+First, accessors can now be consuming, adding a third option to the mutating/non-mutating effect of each access. This is part of the ABI of the declaration, but it is also source-compatibility-affecting if the base type of the storage is non-`Copyable`.
+
+#### Read accesses for non-`Copyable` value types
+
+Second, the value type of a declaration can be non-`Copyable`. A storage declaration of non-copyable type usually supports reading in one of three ways:
+
+- It only allows the current value to be borrowed. This is the rule for stored properties, as well as data structures that present a memory-like abstraction.
+
+- It offers a `get` that consumes the base value, which itself is often non-`Copyable`.
+
+- It offers a `get` that creates a new value.
+
+APIs working with non-`Copyable` types usually cannot evolve between these designs without breaking source compatibility. Doing so would either require adding copies, which is often impossible[^5], or turn an owned value into a borrowed one. Instead, they must simply be designed carefully from the start to make the desired use patterns possible. Non-`Copyable` types can be somewhat unforgiving in this way.
+
+[^5]: Non-copyable types are often non-copyable for some basic semantic reason, such as uniquely owning a socket or representing an exclusive access to memory (like `MutableSpan`). A storage declaration of such a type really cannot offer both copying and borrowing reads. That's not *always* true, though. Consider a data structure that's just non-copyable to avoid copy-on-write overheads. A storage declaration of that type could offer both a `borrow` that just borrows the current value and a `get` that performs a deep copy of it. Whether that's actually a good design, though, is another question entirely, because it invites deep copies of a data structure that's been intentionally designed to make those expensive.
+
+Because this kind of evolution is generally impossible for source-compatibility reasons, Swift uses a more aggressive rule when selecting the stable ABI accessors for storage declarations of non-`Copyable` value type: it provides `get` if the storage declaration supports a copying read, and it provides `_read` if the storage declaration supports a borrowing read (e.g. because it is stored). It is therefore ABI-breaking to change a declaration from a borrowing read to a copying read or vice-versa, even if it is somehow not source-breaking.
+
+#### Explicit borrowing
+
+Third, Swift is likely to eventually add features to explicitly borrow values, such as a `borrow` operator. It would be very surprising if these features were allowed to implicitly copy values rather than borrowing them; most programmers would expect that they would emit an error if borrowing is not possible. However, this creates a source-compatibility question: if a program explicitly borrows from a storage declaration defined outside of the current module, when is the diagnostic allowed to know that the declaration is currently implemented in a borrowable way?
+
+Consider the following:
+
+```swift
+// module Population
+struct Person {
+  var name: String
+}
+
+// module main
+import Population
+
+let boss = ...
+borrow bossName = boss.name
+```
+
+Should this produce an error saying that `employer.name` is not known to be borrowable?
+
+If `Population` has a stable ABI, then the answer is clearly "yes". This code is across a stable ABI boundary from the code that defines `name`, and `Person` is not a `frozen` `struct`, so this module does not know how `name` is implemented. It can only read `name` by calling the `get` accessor that is part of the stable ABI for the property. Therefore, it cannot borrow the value and should emit an error. However, if `Person` were `frozen`, or if `name` were defined with a borrowing read accessor and declared as `@inlinable`, then borrowing can be guaranteed and there is no need to emit an error.
+
+Otherwise, `Population` must be a source library, and so Swift can clearly see that `name` is a stored property which it can borrow from. But if Swift takes advantage of that to not emit an error, `Population` will effectively be prevented from ever evolving this library to make `name` a computed property, because that could break its clients. (Downgrading this to a warning rather than an error would technically eliminate the source break, but many library authors would still hesitate to introduce new warnings into their users' builds.) This is a nasty source compatibility problem, analogous to the issues with enum switch exhaustiveness checking but prone to having much wider impact.
+
+A more conservative rule would be to say that declarations from other modules cannot be borrowed from. However, that would be quite annoying for a few different reasons:
+
+- The first reason is that many declarations would want to promise that they can be borrowed from. For example, most high-performance data structures would likely consider the ability to borrow their elements to be a core performance guarantee. So Swift would need some annotations to opt in on a case-by-case basis.
+
+- The second reason is that modules with stable ABIs already do have those annotations. As mentioned above, a stored property of a `@frozen` type must stay stored, and a non-stored property marked `@inlinable` cannot change its accessors, and so the compiler has a stable guarantee that borrowing is possible. It would be embarrassing for stable-ABI libraries to have expressive capabilities not available to source libraries, and we certainly don't want to encourage source libraries to become stable-ABI libraries purely to gain this.
+
+  It might be reasonable to simply honor these existing attributes as providing source-stability guarantees in source libraries. The guarantee wouldn't need to be quite as strong as it is for libraries with stable ABIs: it would be fine to evolve *stronger* guarantees, like replacing a `yield` accessor with a `borrow` accessor, as long as basic semantic capabilities like the ability to borrow are preserved.
+
+- The third reason is that it draws a hard line at every module boundary.
+
+  - Many modules are co-developed with each other by members of the same team; if making a property computed breaks an explicit `borrow` in another module, they'll see that right away and can just go figure out how to fix the problem. This particular issue is probably solved by packages: we could simply say that it's okay for Swift to acknowledge the implementation of storage within the same package, as defined in [SE-0386][]. (We wouldn't want this to apply to black-box tests within the package, but they should already be opting out of being formally inside the package boundary, as was discussed in that proposal.)
+
+  - Programmers may also sometimes be willing to just live with being tightly coupled to some of their dependencies. Swift could support this by allowing modules to specifically request tight coupling to other modules. Changes like this that would normally be source-compatible would break them, but that's a problem they'd have specifically volunteered for.
+
+#### Scope of usability
+
+Finally, as discussed in the section on scopes of usability, coroutine and non-coroutine accessors have different scopes for the borrowed value / `inout` reference. A storage declaration that replaces a `borrow` accessor with `yield`, or an `inout` accessor with `yield inout`, is tightening the scope in which the value is usable, which is not strictly source-compatible. As with explicit borrows, the key question is when Swift's diagnostics should be allowed to acknowledge what the compiler knows.
+
+When the storage declaration comes from a module with a stable ABI, the module's ABI must decide what the stable ABI accessors for the storage are. In theory, Swift could see that the storage is defined with `borrow` and/or `inout` accessors and use those as stable-ABI accessors by default. This would be a strange decision, though, because it would limit the future evolution of the implementation. It would also be inconsistent with Swift's treatment of stored variables. The more conservative rule is probably the right one: Swift should use its normal rule for deciding the stable-ABI accessors, which would limit users outside the module to a coroutine scope. If the programmer wants to make a stronger guarantee to their users, they can mark the declaration `@inlinable`. (There may be some value to having a way to explicitly specify the stable ABI accessors for a declaration without actually having to make those accessors inlinable.)
+
+For source libraries, the problems closely parallel those discussed above with explicit borrows. The conservative rule for maintaining libraries' ability to evolve their implementations would be for Swift to automatically downgrade the scope of a borrow to a coroutine scope for clients outside of the defining module. There should be some way to override this, and `@inlinable` is probably a good choice. Additionally drawing distinctions on a module basis is not always desirable, and the same ideas above about packages and tight coupling also apply here.
+
 ### Values that represent accesses
 
 It is often useful to build up values from other values. A simple example is that wrapping a value in `Optional` technically makes a new value that stores the old value inside it. A more complex example might be a struct that combines a `TouristSite` with its interest score and its distance from your hotel, for use in planning a trip to a city. In any case, the easiest way to do this is generally to copy the value into the new compound value. But if you're working with non-`Copyable` types, or if you simply need to avoid copying for performance reasons, that may not be acceptable or even allowed.
@@ -853,6 +971,7 @@ There are a number of open questions that will need to be resolved in the proces
 Of course, everything in this document is subject to community review through the Swift Evolution process.
 
 [SE-0268]: https://github.com/swiftlang/swift-evolution/blob/main/proposals/0268-didset-semantics.md
+[SE-0386]: https://github.com/swiftlang/swift-evolution/blob/main/proposals/0386-package-access-modifier.md
 [SE-0413]: https://github.com/swiftlang/swift-evolution/blob/main/proposals/0413-typed-throws.md
 [SE-0418]: https://github.com/swiftlang/swift-evolution/blob/main/proposals/0418-inferring-sendable-for-methods.md
 [SE-0446]: https://github.com/swiftlang/swift-evolution/blob/main/proposals/0446-non-escapable.md
