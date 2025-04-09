@@ -410,7 +410,8 @@ If the decision-making process is dragging out, remember to keep the proposal au
   * Start a new announcement thread (in Evolution > Announcements):
     * The title should be `[New Status] SE-NNNN: Title of Proposal`
     * Describe the outcome of the review and thank the community for its contributions.
-  * Close the review thread.
+  * Make a post in the last review/announcement thread about the proposal. This post should link to the new thread, briefly summarize what happened, and thank the community. It's enough to say something like "SE-NNNN has been accepted"; no need to repeat details from the new thread.
+  * Close the review thread. You may need to ask a moderator to do this for you.
   * Update the proposal document:
     * Change the `Status` field to the new status
       * If the proposal is accepted, and the implementation has already been merged, you may mark it as `Implemented (Swift M.N)` instead. Otherwise, a separate PR should be made later for this.
