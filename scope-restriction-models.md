@@ -1121,20 +1121,34 @@ That's fine for now.
 If we decide refinement is necessary, we'll need to move Phase 2 into a SIL pass, which would be a major rewrite.
 However, we should at least have a solid set of test cases in place.
 
+The Phase 2 checker will collect and solve a system of subscope relationships between all of the scope variables and concrete scopes in a function.
+After Phase 2, all unresolved scope variables will be eliminated and resolved down to specific scope parameters, local access scopes, and intersections thereof.
+Some subscope relationships, especially those only involving scope parameters and/or the immortal global scope, can be checked and resolved during Phase 2.
+Some relationships involving local scopes will need to be checked by the Phase 3 checker in addition to the conflict checking that that pass normally does.
+It should be the case that all the unchecked relationships entering Phase 3 will have the form "(some local access scope) is a superscope of (some other local access scope / some scope parameter / the immortal global scope)".
+
 ### Type representations
 
 The type and signature representations used in the compiler's AST and type-checker will need to be extended to record scope parameters and scope specifiers.
 Scope specifiers are likely to be the most invasive part of this, since they will be necessary on many types that normally do not have this kind of structure, like (otherwise) non-generic nominal types.
 It is an open question whether scope parameters and arguments should be modeled as part of the generic signature and substitutions, implying that non-escapable types are essentially always generic, or as a separate thing.
 Unifying them makes some sense and would fit more cleanly into the existing system of substitution and mapping in and out of context.
-Keeping them separate would make it easier to isolate the handling of scopes within the typechecker.
-It would also offer a temptingly simple solution to the problem of representing these types in SIL.
+However, keeping them separate would make it easier to isolate the handling of scopes within the typechecker.
 
-The Swift optimizer team is currently thinking that they do not want scope specifiers to be explicit in the types used in the SIL pipeline.
-Reflecting these scope specifiers into SIL would add significant overhead and conceptual complexity to SIL, very similar to the burdens caused by local archetypes.
-SIL passes are generally conservative about changing access scopes, so preserving the exact scope-specific information is unlikely to be necessary to achieve correctness.
-Optimizations are also unlikely to use the scope information for performance purposes in the short- to medium-term, and there may be other ways to represent it when they decide to.
-SILGen therefore only needs to represent enough information in SIL to allow the Phase 3 scope-checking pass to correctly handle any local scope dependencies that occur within the function.
+### SIL representations
+
+SIL should also represent scope specifiers explicitly in its type system.[^13]
+This will avoid the complexity of changing the representational expectations of types between the two systems.
+It also preserves the information in case SIL passes decide to use it for performance optimization.
+
+[^13]: There was an earlier misunderstanding on this point.
+
+`begin_access` instructions will bind local scope variables in essentially the same way that the `open_existential` and `open_pack_element` instructions bind local archetypes.
+Similarly, instructions with type operands (such as substitution maps) that depend on a local scope variable will have an implicit value use of the `begin_access` that binds that variable.
+This will allow parts of the SIL pipeline to reason about the dependency without having to consider types explicitly.
+
+Because all of the unchecked constraints entering Phase 3 checking involve a specific local access scope, they can probably just be stored on the `begin_access` instruction.
+It's unclear whether there's any reason to persist these constraints beyond the checking passes.
 
 [SE-0176]: https://github.com/swiftlang/swift-evolution/blob/main/proposals/0176-enforce-exclusive-access-to-memory.md
 [SE-0414]: https://github.com/swiftlang/swift-evolution/blob/main/proposals/0414-region-based-isolation.md
